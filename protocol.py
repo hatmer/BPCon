@@ -2,7 +2,7 @@ import asyncio
 import websockets
 import logging
 import ssl
-import datetime
+import time
 logger = logging.getLogger('websockets')
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler())
@@ -45,7 +45,7 @@ class BPConProtocol:
         # bmsgs := bmsgs U ("1a", bal)
         self.maxBal += 1
         self.Q = Quorum(self.maxBal) 
-        tosend = "{}&1a&{}".format(datetime.datetime.now().isoformat(), self.maxBal)
+        tosend = "{}&1a&{}".format(str(time.time()), self.maxBal)
         yield from self.send_msg(peers,tosend)
         
 
@@ -54,15 +54,18 @@ class BPConProtocol:
         logger.debug("sending 1b")
         if (N > self.maxBal):  
             self.maxBal = N
-            tosend = "&1b&{}&{}&{}&mysig".format(N,self.maxVBal,self.maxVVal,self.avs)
-            return tosend
-            # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
+        tosend = "&1b&{}&{}&{}&mysig".format(N,self.maxVBal,self.maxVVal,self.avs)
+        return tosend
+        # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
+            
 
     @asyncio.coroutine
     def phase1c(self):
+        logger.debug("sending 1c")
         # bmsgs := bmsgs U ("1c", bal, val)
         val = "?" # specific value or all values safe
-        tosend = "&1c&{}&{}&{}".format(self.Q.N, val, self.Q.acceptor_sigs)
+        tosend = "&1c&{}&{}&{}".format(self.Q.N, val, self.Q.get_signatures())
+        logger.debug(tosend)
         return tosend
 
     @asyncio.coroutine
@@ -73,9 +76,9 @@ class BPConProtocol:
             # remove r from avs where r.val == m.val
             self.maxBal = b
 
-    @asyncio.coroutine
-    def phase2b(self, b):
-        if self.maxBal <= b:
+    #@asyncio.coroutine
+    def phase2b(self, b,v):
+        if self.maxBal <= int(b):
                 # exists (2av, b) pairing in sentMsgs that quorum of acceptors agree upon
                 # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
             
@@ -83,27 +86,31 @@ class BPConProtocol:
 
             self.maxBal = b
             self.maxVBal = b
-            value = "?"
 
-            return "&2b&{}".format(value)
+            return "&2b&{}&{}".format(b,v)
 
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         logger.debug("main loop")
         # idle until receives network input
-        try:
-            input_msg = yield from websocket.recv()
-            if len(input_msg) < 4:
-                raise Exception()
-        except:
-            logger.info("Bad input")
-            return
-        
-        parts = input_msg.split('&')
+        input_msg = yield from websocket.recv()
+        logger.debug("got input")
+        output_msg = yield from self.handle_msg(input_msg)
+        if output_msg:
+            yield from websocket.send(str(time.time()) + output_msg)
+            self.bmsgs.append(output_msg)
+            print(self.bmsgs)
+        else:
+            logger.debug("did nothing")
+
+    @asyncio.coroutine    
+    def handle_msg(self, msg):    
+        parts = msg.split('&')
         num_parts = len(parts)
         timestamp = parts[0]
         msg_type = parts[1]
         N = int(parts[2])
+        output_msg = None
         
         if msg_type == "1a" and num_parts == 3:
             # a peer is leader for a ballot, requesting votes
@@ -113,7 +120,7 @@ class BPConProtocol:
         elif msg_type == "1b" and num_parts == 6:
             # implies is leader for ballot, has quorum object
             logger.debug("got 1b!!!")
-            [v,vs,sig] = input_msg.split(delim)[3:6]
+            [v,vs,sig] = parts[3:6]
 
             # do stuff with v and 2avs
             # update avs structure here for newest ballot number for value
@@ -123,20 +130,21 @@ class BPConProtocol:
                 if self.Q.got_majority_accept():
                     logger.info("quorum accepts")
                     output_msg = yield from self.phase1c()
-                    logger.debug("sending 1c")
                     yield from self.send_msg(peers,output_msg)
                 else:
                     logger.info("quorum rejects")
                     self.Q = None
+                    
                  
         elif msg_type == "1c" and num_parts == 5:
             logger.debug("got 1c")
-            [N,v,sigs] = input_msg.split(delim)[1:5]
+            [N,v,sigs] = parts[2:5]
             
-            for sig in sigs:
+            for sig in sigs.split(','):
                 # test against pubkey
-                pass
-            self.phase2b(N,v)
+                logger.debug("testing sig here...")
+                logger.debug(sig)
+            output_msg = self.phase2b(N,v)
 
         elif msg_type == "2b" and num_parts == 4:
             logger.debug("got 2b")
@@ -152,25 +160,24 @@ class BPConProtocol:
         # generate output from socket input
         #print("< {}".format(input_msg))
         
-        output_msg = datetime.datetime.now().isoformat() + output_msg
-        yield from websocket.send(output_msg)
         #print("> {}".format(output_msg))
         
-        self.bmsgs.append(output_msg)
-        print(self.bmsgs)
-        
+        return output_msg
 
     @asyncio.coroutine
     def send_msg(self, dest_wss, to_send):
         cctx = get_ssl_context('trusted/')
         for ws in dest_wss:
             websocket = yield from websockets.client.connect(ws, ssl=cctx)
-        
+            logger.debug("1 sending...")
             try:
+                logger.debug("2 sending...")
                 yield from websocket.send(to_send)
                 input_msg = yield from websocket.recv()
+                yield from self.handle_msg(input_msg)
                 logger.info("got input msg: {}".format(input_msg))  
-            except:
+            except Exception as e:
+                logger.debug(e)
                 logger.info("send failed")
             finally:
                 yield from websocket.close()

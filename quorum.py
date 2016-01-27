@@ -10,7 +10,7 @@ class Quorum(object):
         self.acceptor_sigs = {} 
 
     def add(self, n, v, a_sig):
-        if a_id not in self.acceptor_ids:
+        if a_sig not in self.acceptor_sigs:
             if n <= self.N:
                 self.acceptors += 1
                 accepted = 1
@@ -27,3 +27,6 @@ class Quorum(object):
     def got_majority_accept(self):
         # returns True for accepted, False for rejected
         return self.acceptors >= self.rejectors
+    
+    def get_signatures(self):
+        return ",".join(self.acceptor_sigs.keys())
