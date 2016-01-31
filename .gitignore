@@ -1,0 +1,10 @@
+creds/
+
+*.pyc
+*.egg
+*.egg-info
+
+push.sh
+
+__pycache__
+BPCon/__pycache__
