@@ -10,35 +10,39 @@ logger.addHandler(logging.StreamHandler())
 
 ip_addr = 'localhost'
 port = 9000
-certfile = 'keys/server.crt'
-keyfile = 'keys/server.key'
+certfile = 'creds/keys/server.crt'
+keyfile = 'creds/keys/server.key'
+peer_certs = 'creds/trusted/'
 
 def getContext():
     ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)   
     ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    ctx.check_hostname = False
     return ctx
 
 class CongregateProtocol1:
     def __init__(self):
-        self.b = BPConProtocol()
-        self.b.parent = self
+        self.b = BPConProtocol(peer_certs) 
         self.c = CongregateProtocol()
-        self.c.parent = self
         self.paxos_server = websockets.serve(self.b.main_loop, ip_addr, port, ssl=getContext())
         self.congregate_server = websockets.serve(self.c.server_loop, ip_addr, port+1, ssl=getContext())
         self.loop = asyncio.get_event_loop()
         self.loop.run_until_complete(self.paxos_server)
         self.loop.run_until_complete(self.congregate_server)
-        #self.db_commit("hello")
+#        self.db_commit("hello")
 
     def db_commit(self, msg):
         bpcon_task = asyncio.Future()
         bpcon_task.add_done_callback(self.got_commit_result)
         self.loop.run_until_complete(self.b.phase1a("hello", bpcon_task))
+#        with timeout(1.5):
+#            yield from verify_commit()
+#    @asyncio.coroutine
+#    def verify_commit():
         
-
+    
     def got_commit_result(self, future):
-        print(future.result())
+        assert future.result() == "Done!!!"
 
 class CongregateProtocol:
     @asyncio.coroutine
@@ -49,6 +53,7 @@ class CongregateProtocol:
         except Exception as e:
             logger.debug(e)
         print(input_msg)
+        yield from websocket.send("hello")
         logger.debug('checkpiont')
 
     @asyncio.coroutine

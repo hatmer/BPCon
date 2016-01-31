@@ -27,13 +27,14 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self):
+    def __init__(self, peer_certs):
+        self.peer_certs = peer_certs
         self.maxBal = -1
-        self.maxVBal = -1 # highest ballot voted in
-        self.maxVVal = None # value voted for maxVBal
-        self.avs = {} # msg dict keyed by value (max ballot saved only)
-        self.seen = {} #1b messages -> use to check if v is safe at b
-        self.bmsgs = []
+        self.maxVBal = -1       # highest ballot voted in
+        self.maxVVal = None     # value voted for maxVBal
+        self.avs = {}           # msg dict keyed by value (max ballot saved only)
+        self.seen = {}          # 1b messages -> use to check if v is safe at b
+        self.bmsgs = []         # log of messages sent by this instance
         self.peers = RoutingManager(['wss://localhost:9000/'])
         self.Q = None
         self.val = ""
@@ -60,9 +61,11 @@ class BPConProtocol:
     @asyncio.coroutine
     def phase1b(self, N):
         logger.debug("sending 1b")
+        tosend = "{}&1b&{}&{}&{}".format(time.time(),N,self.maxVBal,self.maxVVal,self.avs)
         if (N > int(self.maxBal)): #maxbal undefined behavior sometimes 
             self.maxBal = N
-        tosend = "&1b&{}&{}&{}&mysig".format(N,self.maxVBal,self.maxVVal,self.avs)
+        tosend = tosend + "&mysig"
+
         return tosend
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
             
@@ -83,7 +86,7 @@ class BPConProtocol:
             self.maxBal = b
 
     #@asyncio.coroutine
-    def phase2b(self, b,v):
+    def phase2b(self, b, v):
         if int(self.maxBal) <= int(b): # undefined maxbal here also
                 # exists (2av, b) pairing in sentMsgs that quorum of acceptors agree upon
                 # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
@@ -93,7 +96,7 @@ class BPConProtocol:
             self.maxBal = b
             self.maxVBal = b
 
-            return "&2b&{}&{}".format(b,v)
+            return "{}&2b&{}&{}".format(time.time(), b, v)
 
     @asyncio.coroutine
     def main_loop(self, websocket, path):
@@ -107,7 +110,7 @@ class BPConProtocol:
             logger.debug("got input")
             output_msg = yield from self.handle_msg(input_msg)
             if output_msg:
-                yield from websocket.send(str(time.time()) + output_msg)
+                yield from websocket.send(output_msg)
                 self.bmsgs.append(output_msg)
                 print(self.bmsgs)
             else:
@@ -154,7 +157,7 @@ class BPConProtocol:
             [N,v,sigs] = parts[2:5]
             signatures = sigs.split(',')
             if len(signatures) <= self.peers.num_peers:
-                for sig in sigs.split(','):
+                for sig in signatures:
                     # test against pubkey
                     logger.debug("testing sig here...")
                     logger.debug(sig)
@@ -173,7 +176,7 @@ class BPConProtocol:
         """
         client socket
         """
-        cctx = get_ssl_context('trusted/')
+        cctx = get_ssl_context(self.peer_certs)
         for ws in dest_wss:
             try:
                 client_socket = yield from websockets.client.connect(ws, ssl=cctx)
