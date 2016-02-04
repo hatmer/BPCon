@@ -1,11 +1,15 @@
-creds/
+### File Types ###
 
+*.swp
 *.pyc
 *.egg
 *.egg-info
 
+### Specific Files ###
 push.sh
 
+### Directories ###
+creds/
 __pycache__
 BPCon/__pycache__
 .cache

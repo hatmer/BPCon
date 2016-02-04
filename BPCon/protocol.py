@@ -3,13 +3,13 @@ import websockets
 import logging
 import ssl
 import time
-logger = logging.getLogger('websockets')
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
+#self.logger = logging.getLogger('websockets')
+#self.logger.setLevel(logging.CRITICAL)
+#self.logger.addHandler(logging.StreamHandler())
 
-logger2 = logging.getLogger('websockets.server')
-logger2.setLevel(logging.ERROR)
-logger2.addHandler(logging.StreamHandler())
+#self.logger2 = logging.getLogger('websockets.server')
+#self.logger2.setLevel(logging.ERROR)
+#self.logger2.addHandler(logging.StreamHandler())
 
 from BPCon.quorum import Quorum
 from BPCon.utils import get_ssl_context
@@ -27,7 +27,8 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self, peer_certs):
+    def __init__(self, peer_certs, logger):
+        self.logger = logger
         self.peer_certs = peer_certs
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
@@ -48,7 +49,7 @@ class BPConProtocol:
 
     @asyncio.coroutine
     def phase1a(self, val, future):
-        logger.debug("sending 1a")
+        self.logger.debug("sending 1a")
         #check for prior quorum being managed
         # bmsgs := bmsgs U ("1a", bal)
         self.maxBal += 1
@@ -57,11 +58,12 @@ class BPConProtocol:
         self.pending = future
         tosend = "&1a&{}".format(self.maxBal)
         yield from self.send_msg(self.peers.peers,tosend)
+        return
 
     @asyncio.coroutine
     def phase1b(self, N):
-        logger.debug("sending 1b")
-        tosend = "{}&1b&{}&{}&{}".format(time.time(),N,self.maxVBal,self.maxVVal,self.avs)
+        self.logger.debug("sending 1b")
+        tosend = "{}&1b&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
         if (N > int(self.maxBal)): #maxbal undefined behavior sometimes 
             self.maxBal = N
         tosend = tosend + "&mysig"
@@ -72,7 +74,7 @@ class BPConProtocol:
 
     #@asyncio.coroutine
     def phase1c(self):
-        logger.debug("sending 1c")
+        self.logger.debug("sending 1c")
         # bmsgs := bmsgs U ("1c", bal, val)
         tosend = "&1c&{}&{}&{}".format(self.Q.N, self.val, self.Q.get_signatures())
         return tosend
@@ -96,27 +98,27 @@ class BPConProtocol:
             self.maxBal = b
             self.maxVBal = b
 
-            return "{}&2b&{}&{}".format(time.time(), b, v)
+            return "{}&2b&{}&{}".format(str(time.time()), b, v)
 
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         """
         server socket
         """ 
-        logger.debug("main loop")
+        self.logger.debug("main loop")
         # idle until receives network input
         try:
             input_msg = yield from websocket.recv()
-            logger.debug("got input")
+            self.logger.debug("got input")
             output_msg = yield from self.handle_msg(input_msg)
             if output_msg:
                 yield from websocket.send(output_msg)
                 self.bmsgs.append(output_msg)
                 print(self.bmsgs)
             else:
-                logger.debug("did nothing")
+                self.logger.debug("did nothing")
         except Exception as e:
-            logger.info(e)
+            self.logger.info(e)
 
     @asyncio.coroutine    
     def handle_msg(self, msg):    
@@ -134,40 +136,46 @@ class BPConProtocol:
             
         elif msg_type == "1b" and num_parts == 6:
             # implies is leader for ballot, has quorum object
-            logger.debug("got 1b!!!")
+            self.logger.debug("got 1b!!!")
             [mb,mv,sig] = parts[3:6]
 
             # do stuff with v and 2avs
             # update avs structure here for newest ballot number for value
             self.Q.add(N,int(mb), mv,sig)
             if self.Q.is_quorum():
-                logger.info("got quorum")
+                self.logger.info("got quorum")
                 if self.Q.got_majority_accept():
-                    logger.info("quorum accepts")
+                    self.logger.info("quorum accepts")
                     output_msg = self.phase1c()
                     yield from self.send_msg(self.peers.peers,output_msg)
                 else:
-                    logger.info("quorum rejects")
+                    self.logger.info("quorum rejects")
                     self.Q = None
-                    self.pending.set_result("commit failed")
+                    if self.pending.cancelled():
+                        self.logger.info("timeout before quorum rejection complete")
+                    else:    
+                        self.pending.set_result("commit failed")
                     
                  
         elif msg_type == "1c" and num_parts == 5:
-            logger.debug("got 1c")
+            self.logger.debug("got 1c")
             [N,v,sigs] = parts[2:5]
             signatures = sigs.split(',')
             if len(signatures) <= self.peers.num_peers:
                 for sig in signatures:
                     # test against pubkey
-                    logger.debug("testing sig here...")
-                    logger.debug(sig)
+                    self.logger.debug("testing sig here...")
+                    self.logger.debug(sig)
                 output_msg = self.phase2b(N,v)
 
         elif msg_type == "2b" and num_parts == 4:
-            logger.debug("got 2b")
-            self.pending.set_result("Done!!!") 
+            self.logger.debug("got 2b")
+            if self.pending.cancelled():
+                self.logger.info("timeout before phase2b complete")
+            else:    
+                self.pending.set_result("Done!!!") 
         else:
-            logger.info("non-paxos msg received")
+            self.logger.info("non-paxos msg received")
         
         return output_msg
 
@@ -183,10 +191,12 @@ class BPConProtocol:
                 yield from client_socket.send(str(time.time()) + to_send)
                 input_msg = yield from client_socket.recv()
                 yield from self.handle_msg(input_msg)
-                #logger.info("got input msg: {}".format(input_msg)) 
-                yield from client_socket.close()
+            
             except Exception as e:
-                logger.info(e)
-                logger.info("ERROR EXCEPTION AAAAHHH") # better debug messages
+                self.logger.info("client socket send failed") 
 
-
+            finally:
+                try:
+                    yield from client_socket.close()
+                except Exception as e:
+                    self.logger.info("no socket to close after send attempt")
