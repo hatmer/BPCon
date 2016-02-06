@@ -49,32 +49,29 @@ class BPConProtocol:
 
     @asyncio.coroutine
     def phase1a(self, val, future):
-        self.logger.debug("sending 1a")
         #check for prior quorum being managed
         # bmsgs := bmsgs U ("1a", bal)
         self.maxBal += 1
         self.Q = Quorum(self.maxBal)
         self.val = val
         self.pending = future
+        self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, self.val))
         tosend = "&1a&{}".format(self.maxBal)
         yield from self.send_msg(self.peers.peers,tosend)
-        return
 
     @asyncio.coroutine
     def phase1b(self, N):
-        self.logger.debug("sending 1b")
+        # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
+        self.logger.debug("sending 1b -> {}".format(N))
         tosend = "{}&1b&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
         if (N > int(self.maxBal)): #maxbal undefined behavior sometimes 
             self.maxBal = N
         tosend = tosend + "&mysig"
 
         return tosend
-        # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
             
-
-    #@asyncio.coroutine
     def phase1c(self):
-        self.logger.debug("sending 1c")
+        self.logger.debug("sending 1c -> {}: {}".format(self.Q.N, self.val))
         # bmsgs := bmsgs U ("1c", bal, val)
         tosend = "&1c&{}&{}&{}".format(self.Q.N, self.val, self.Q.get_signatures())
         return tosend
@@ -87,14 +84,12 @@ class BPConProtocol:
             # remove r from avs where r.val == m.val
             self.maxBal = b
 
-    #@asyncio.coroutine
     def phase2b(self, b, v):
         if int(self.maxBal) <= int(b): # undefined maxbal here also
-                # exists (2av, b) pairing in sentMsgs that quorum of acceptors agree upon
-                # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
+            # exists (2av, b) pairing in sentMsgs that quorum of acceptors agree upon
+            # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
             
             self.maxVVal = v
-
             self.maxBal = b
             self.maxVBal = b
 
@@ -151,10 +146,10 @@ class BPConProtocol:
                 else:
                     self.logger.info("quorum rejects")
                     self.Q = None
-                    if self.pending.cancelled():
-                        self.logger.info("timeout before quorum rejection complete")
+                    if self.pending.done():
+                        self.logger.info("cancelled_1")
                     else:    
-                        self.pending.set_result("commit failed")
+                        self.pending.set_result("rejected")
                     
                  
         elif msg_type == "1c" and num_parts == 5:
@@ -170,10 +165,10 @@ class BPConProtocol:
 
         elif msg_type == "2b" and num_parts == 4:
             self.logger.debug("got 2b")
-            if self.pending.cancelled():
-                self.logger.info("timeout before phase2b complete")
+            if self.pending.done():
+                self.logger.info("cancelled_2")
             else:    
-                self.pending.set_result("Done!!!") 
+                self.pending.set_result("successful") 
         else:
             self.logger.info("non-paxos msg received")
         
