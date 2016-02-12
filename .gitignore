@@ -1,6 +1,7 @@
 ### File Types ###
 
 *.swp
+BPCon/*.swp
 *.pyc
 *.egg
 *.egg-info

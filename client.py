@@ -2,7 +2,6 @@ import asyncio
 import websockets
 import logging
 import ssl
-from contextlib import suppress
 
 from logging.config import fileConfig
 from BPCon.protocol import BPConProtocol
@@ -11,12 +10,12 @@ from BPCon.protocol import BPConProtocol
 #FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
 #logging.basicConfig(format=FORMAT)
 
-#logger = logging.getLogger('websockets')
-#logger.setLevel(logging.DEBUG)
-#logger.addHandler(logging.StreamHandler())
+logger = logging.getLogger('websockets')
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.StreamHandler())
 
-fileConfig('logging_config.ini')
-logger = logging.getLogger()
+#fileConfig('logging_config.ini')
+#logger = logging.getLogger()
 
 ip_addr = 'localhost'
 port = 8000
@@ -42,12 +41,16 @@ class CongregateProtocol1:
         self.loop.run_until_complete(self.congregate_server)
 
         self.c.commit("hello1")
-        print("Pending tasks: %s" % asyncio.Task.all_tasks(self.loop))
         self.c.commit("hello2")
-        print("Pending tasks: %s" % asyncio.Task.all_tasks(self.loop))
-        self.c.commit("hello3")
-        print("Pending tasks: %s" % asyncio.Task.all_tasks(self.loop))
-
+#        self.c.commit("hello3")
+#        self.c.commit("hello4")
+#        self.c.commit("hello5")
+#        self.c.commit("hello1")
+#        self.c.commit("hello2")
+#        self.c.commit("hello3")
+#        self.c.commit("hello4")
+#        self.c.commit("hello5")
+        self.loop.close()
     def shutdown(self):
         self.paxos_server.close()
         self.congregate_server.close()
@@ -69,39 +72,32 @@ class CongregateProtocol:
         bpcon_task = asyncio.Future()
         bpcon_task.add_done_callback(self.got_commit_result)
         
-        t1 = asyncio.async(asyncio.shield(self.db_commit(msg, bpcon_task)))
-        self.parent.loop.run_until_complete(t1)
+        asyncio.wait_for(bpcon_task, 3.0) # catch exceptions, verify result
+        self.parent.loop.run_until_complete(self.db_commit(msg, bpcon_task))
+        self.parent.loop.run_until_complete(asyncio.sleep(1))
         
-        #self.parent.loop.run_until_complete(asyncio.gather(*asyncio.Task.all_tasks()))
-        #print("Pending tasks after gather: %s" % asyncio.Task.all_tasks(self.parent.loop))
-
     @asyncio.coroutine
     def db_commit(self, msg, future):
-#        tasks = []
         try:
-            paxos_task = asyncio.async(asyncio.shield(self.parent.b.phase1a(msg,future)))
-#            tasks.append(paxos_task)
-            
-            res = yield from asyncio.wait_for(future, timeout=3)
-
-#            yield from asyncio.gather(*asyncio.Task.all_tasks())
-#            logger.debug("test2")
-#            print("Pending tasks in db_commit: %s" % asyncio.Task.all_tasks(self.parent.loop))
-
+            a = yield from self.parent.b.phase1a(msg, future)
+        
         except asyncio.TimeoutError:
             logger.info("db commit timed out")
-        
+            print("{}".format(a))
+        except asyncio.CancelledError:
+            logger.info("db commit future cancelled")
     def got_commit_result(self, future):
         if future.done():
             #do cleanup
-            logger.info(future.result())
-            print("future done")
+            if not future.cancelled():
+                logger.info("future result: {}".format(future.result()))
+            else:
+                logger.info("future cancelled")
         else:    
-            print("future not done")
-            print(future.result())
-            
+            logger.info("future not done ???")
 
-#c = CongregateProtocol1()
+        #print("Pending tasks: %s" % asyncio.Task.all_tasks(self.parent.loop))    
+            
 
 def tester():
     try:
@@ -115,7 +111,6 @@ def tester():
             c.shutdown()
             print('done')
         finally:
-            c.shutdown()
             asyncio.get_event_loop().close()
     except Exception as e:
         logger.debug(e)

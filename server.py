@@ -4,19 +4,19 @@ import logging
 import ssl
 from contextlib import suppress
 
-from logging.config import fileConfig
+#from logging.config import fileConfig
 from BPCon.protocol import BPConProtocol
 
 #FORMAT = '%(levelname)s %(asctime)-15s [%(filename)s %(funcName)s] %(message)s'
 #FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
 #logging.basicConfig(format=FORMAT)
 
-#logger = logging.getLogger('websockets')
-#logger.setLevel(logging.DEBUG)
-#logger.addHandler(logging.StreamHandler())
+logger = logging.getLogger('websockets')
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.StreamHandler())
 
-fileConfig('logging_config.ini')
-logger = logging.getLogger()
+#fileConfig('logging_config.ini')
+#logger = logging.getLogger()
 
 ip_addr = 'localhost'
 port = 9000
@@ -75,7 +75,7 @@ class CongregateProtocol:
             paxos_task = asyncio.async(asyncio.shield(self.parent.b.phase1a(msg,future)))
 #            tasks.append(paxos_task)
             
-            res = yield from asyncio.wait_for(future, timeout=3)
+            yield from asyncio.wait_for(future, timeout=3)
 
 #            yield from asyncio.gather(*asyncio.Task.all_tasks())
 #            logger.debug("test2")
@@ -83,6 +83,8 @@ class CongregateProtocol:
 
         except asyncio.TimeoutError:
             logger.info("db commit timed out")
+        except Exception as e:
+            logger.debug(e)
         
     def got_commit_result(self, future):
         if future.done():
@@ -94,8 +96,6 @@ class CongregateProtocol:
             print("future not done")
             print(future.result())
             
-
-#c = CongregateProtocol1()
 
 def tester():
     try:
@@ -109,7 +109,6 @@ def tester():
             c.shutdown()
             print('done')
         finally:
-            c.shutdown()
             asyncio.get_event_loop().close()
     except Exception as e:
         logger.debug(e)
