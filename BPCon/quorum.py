@@ -1,7 +1,7 @@
-num_peers = 1
+
 
 class Quorum(object):
-    def __init__(self, ballot_num):
+    def __init__(self, ballot_num, num_peers):
         self.N = ballot_num
         self.num_peers = num_peers
         self.quorum = int((num_peers / 2) + (num_peers % 2))
@@ -23,7 +23,6 @@ class Quorum(object):
 
     def is_quorum(self):
         # returns True if majority vote achieved
-        print("required for quorum: {}".format(self.quorum))
         return ((self.acceptors >= self.quorum) or (self.rejectors >= self.quorum))
 
     def got_majority_accept(self):

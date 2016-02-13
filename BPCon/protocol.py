@@ -26,6 +26,8 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 
 """
 
+peers = {'localhost1':'wss://localhost:9000/'}
+
 class BPConProtocol:
     def __init__(self, peer_certs, logger):
         self.logger = logger
@@ -36,7 +38,7 @@ class BPConProtocol:
         self.avs = {}           # msg dict keyed by value (max ballot saved only)
         self.seen = {}          # 1b messages -> use to check if v is safe at b
         self.bmsgs = []         # log of messages sent by this instance
-        self.peers = RoutingManager(['wss://localhost:9000/'])
+        self.peers = RoutingManager(peers)
         self.Q = None
         self.val = ""
         self.pending = None
@@ -58,7 +60,7 @@ class BPConProtocol:
         #check for prior quorum being managed
         # bmsgs := bmsgs U ("1a", bal)
         self.maxBal += 1
-        self.Q = Quorum(self.maxBal)
+        self.Q = Quorum(self.maxBal, 1)
         self.logger.debug("creating Quorum object with N={}".format(self.maxBal))
         self.val = val
         self.pending = future
