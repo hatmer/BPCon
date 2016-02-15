@@ -8,8 +8,9 @@ class Quorum(object):
         self.acceptors = 0
         self.rejectors = 0
         self.acceptor_sigs = {} 
+        self.commits = 0
 
-    def add(self, N, mb, mv, a_sig):
+    def add_1b(self, N, mb, mv, a_sig):
         if N == self.N: # do stuff with other ballots 
             if a_sig not in self.acceptor_sigs.keys():
                 if mb < self.N:
@@ -21,7 +22,15 @@ class Quorum(object):
 
                 self.acceptor_sigs[a_sig] = accepted    
 
-    def is_quorum(self):
+    def add_2b(self, N):
+        if N == self.N:
+            self.commits += 1
+
+    def quorum_2b(self):
+        return self.commits >= self.quorum
+
+    def quorum_1b(self):
+        print("acceptors: {}, rejectors: {}, quorum: {}".format(self.acceptors, self.rejectors, self.quorum))
         # returns True if majority vote achieved
         return ((self.acceptors >= self.quorum) or (self.rejectors >= self.quorum))
 

@@ -26,10 +26,8 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 
 """
 
-peers = {'localhost1':'wss://localhost:9000/'}
-
 class BPConProtocol:
-    def __init__(self, peer_certs, logger):
+    def __init__(self, peer_certs, logger, peers):
         self.logger = logger
         self.peer_certs = peer_certs
         self.maxBal = -1
@@ -49,51 +47,60 @@ class BPConProtocol:
 
     def knowsSafeAt(ac, b, v):
         pass
-    def send_cleanup(self, future):
-        if future.done():   
-            self.logger.debug("send returned {}".format(future.result()))
-        else:
-            self.logger.debug("cleanup fail")
 
     @asyncio.coroutine
     def phase1a(self, val, future):
-        #check for prior quorum being managed
         # bmsgs := bmsgs U ("1a", bal)
+        if self.Q:
+            self.logger.error("prior quorum being managed for ballot {}".format(self.Q.N))
+        #else    
         self.maxBal += 1
-        self.Q = Quorum(self.maxBal, 1)
-        self.logger.debug("creating Quorum object with N={}".format(self.maxBal))
-        self.val = val
+        self.Q = Quorum(self.maxBal, self.peers.num_peers)
+        self.logger.debug("creating Quorum object with N={}, num_peers={}".format(self.maxBal, self.peers.num_peers))
         self.pending = future
-        self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, self.val))
-        tosend = "&1a&{}".format(self.maxBal)
+        self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, val))
+        msg_1a = "&1a&{}".format(self.maxBal)
 
-        #quorum_response = yield from self.send_msg(tosend)
-        quorum_response = yield from asyncio.async(self.send_msg(tosend))
-        if quorum_response == "accepted":
-            #verify = yield from self.send(self.phase1c())
-            #if verify == "committed":
-            self.pending.set_result("accepted")
+        yield from asyncio.async(self.send_msg(msg_1a))
+        
+        if self.pending.done():
+            # Error case
+            return "cancelled"
+        
+        if self.Q.quorum_1b():
+            if self.Q.got_majority_accept():
+                self.logger.info("quorum accepts")
+                yield from self.send_msg(self.phase1c(val)) # send 1c
+                if self.Q.quorum_2b():
+                    # Quorum Accepts and Commit succeeds case
+                    self.pending.set_result("success")
+                    return "accepted"
+                # Quorum Accepts then Commit fails case    
+                self.pending.set_result("commit failure")    
+                return "commit failure"    
+            else:
+                # Quorum Rejects case
+                self.pending.set_result("quorum rejects")
+                return "rejected"
 
-        elif quorum_response == "rejected":
-            self.pending.set_result("rejected")
+        else:
+            self.pending.set_result("failure")
+            return "no quorum"    
             
-        #return quorum_response
-            
-    @asyncio.coroutine
+        
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
         self.logger.debug("sending 1b -> {}".format(N))
         tosend = "{}&1b&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
-        if (N > int(self.maxBal)): #maxbal undefined behavior sometimes 
+        if (int(N) > int(self.maxBal)): #maxbal undefined behavior sometimes 
             self.maxBal = N
         tosend = tosend + "&mysig"
-
         return tosend
             
-    def phase1c(self):
-        self.logger.debug("sending 1c -> {}: {}".format(self.Q.N, self.val))
+    def phase1c(self, val):
         # bmsgs := bmsgs U ("1c", bal, val)
-        tosend = "&1c&{}&{}&{}".format(self.Q.N, self.val, self.Q.get_signatures())
+        self.logger.debug("sending 1c -> {}: {}".format(self.Q.N, val))
+        tosend = "&1c&{}&{}&{}".format(self.Q.N, val, self.Q.get_signatures())
         return tosend
 
     @asyncio.coroutine
@@ -105,9 +112,9 @@ class BPConProtocol:
             self.maxBal = b
 
     def phase2b(self, b, v):
+        # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
         if int(self.maxBal) <= int(b): # undefined maxbal here also
             # exists (2av, b) pairing in sentMsgs that quorum of acceptors agree upon
-            # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
             
             self.maxVVal = v
             self.maxBal = b
@@ -125,7 +132,7 @@ class BPConProtocol:
         try:
             input_msg = yield from websocket.recv()
             self.logger.debug("< {}".format(input_msg))
-            output_msg = yield from self.handle_msg(input_msg)
+            output_msg = self.handle_msg(input_msg)
             if output_msg:
                 yield from websocket.send(output_msg)
                 self.bmsgs.append(output_msg)
@@ -133,7 +140,7 @@ class BPConProtocol:
             else:
                 self.logger.debug("did nothing")
         except Exception as e:
-            self.logger.info(e)
+            self.logger.info("mainloop exception: {}".format(e))
 #        print("Pending tasks after mainloop: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop()))    
 
 
@@ -146,12 +153,11 @@ class BPConProtocol:
         timestamp = parts[0]
         msg_type = parts[1]
         N = int(parts[2])
-        output_msg = None
         
         if msg_type == "1a" and num_parts == 3:
             # a peer is leader for a ballot, requesting votes
-            #if N > int(self.maxBal):
             output_msg = self.phase1b(N)
+            return output_msg
             
         elif msg_type == "1b" and num_parts == 6:
             # implies is leader for ballot, has quorum object
@@ -160,24 +166,7 @@ class BPConProtocol:
 
             # do stuff with v and 2avs
             # update avs structure here for newest ballot number for value
-            self.Q.add(N,int(mb), mv, sig)
-            print(self.Q.is_quorum())
-            if self.Q.is_quorum():
-                self.logger.info("got quorum")
-                if self.Q.got_majority_accept():
-                    self.logger.info("quorum accepts")
-                    return "accepted"
-                else:   
-                    self.logger.info("quorum rejects")
-                    return "rejected"
-            else:
-                return "pending"
-#                    self.logger.info("quorum rejects")
-#                    if self.pending.done():
-#                        self.logger.info("cancelled_1")
-#                    else:    
-#                        self.pending.set_result("rejected")
-                    
+            self.Q.add_1b(N,int(mb), mv, sig)
                  
         elif msg_type == "1c" and num_parts == 5:
             self.logger.debug("got 1c")
@@ -189,46 +178,29 @@ class BPConProtocol:
                     self.logger.debug("testing sig here...")
                     self.logger.debug(sig)
                 output_msg = self.phase2b(N,v)
+                return output_msg
 
         elif msg_type == "2b" and num_parts == 4:
             self.logger.debug("got 2b")
-            if self.pending.done():
-                self.logger.info("cancelled_2")
-            else:    
-                self.pending.set_result("successful") 
+            self.Q.add_2b(N)
         else:
             self.logger.info("non-paxos msg received")
-        return output_msg 
+
     @asyncio.coroutine
     def send_msg(self, to_send):
         """
-        client socket
+        client socket 
         """
-        connected = []
-        res = "no_peers"
-        for ws in self.peers.peers:
+        for ws in self.peers.get_all():
             try:
+                self.logger.debug("sending {} to {}".format(to_send, ws))
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
                 yield from client_socket.send(str(time.time()) + to_send)
-                connected.append(client_socket)
+                input_msg = yield from client_socket.recv()
+                self.handle_msg(input_msg)
             except Exception as e:
-                self.logger.info("peer {} unreachable".format(ws))
+                self.logger.info("send to peer {} failed with {}".format(ws, e))
                 
-        for s in connected:
-            try:
-                input_msg = None
-                try:
-                    input_msg = yield from asyncio.wait_for(client_socket.recv(), 1.0) 
-                except Exception as e:
-                    self.logger.debug("recv from peer failed: {}".format(e))
-                if input_msg:    
-                    self.logger.debug("got input from peer: {}".format(input_msg))
-                    res = self.handle_msg(input_msg)
-                    self.logger.debug(res)
-                else:
-                    self.logger.debug("peer sent nothing")
-            except Exception as e:
-                self.logger.info("peer unresponsive: {}".format(e)) 
             finally:
                 try:
                     yield from client_socket.close()
@@ -236,4 +208,3 @@ class BPConProtocol:
                     self.logger.debug("no socket to close")
         
         #print("Pending tasks after send: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop())) 
-        return res

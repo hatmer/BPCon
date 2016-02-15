@@ -2,6 +2,8 @@ import asyncio
 import websockets
 import logging
 import ssl
+import configparser
+import sys
 
 from logging.config import fileConfig
 from BPCon.protocol import BPConProtocol
@@ -17,12 +19,20 @@ logger.addHandler(logging.StreamHandler())
 #fileConfig('logging_config.ini')
 #logger = logging.getLogger()
 
-ip_addr = 'localhost'
-port = 8000
-certfile = 'creds/keys2/server.crt'
-keyfile = 'creds/keys2/server.key'
+configFile = sys.argv[1] # TODO improve
+config = configparser.ConfigParser()
+config.read(configFile)
 
-peer_certs = 'creds/trusted/'
+ip_addr = config['network']['ip_addr']
+port = int(config['network']['port'])
+
+peerlist = {}
+for key,val in config.items('peers'):
+    peerlist[key] = val
+
+peer_certs = config['creds']['peer_certs']
+certfile = config['creds']['certfile']
+keyfile = config['creds']['keyfile']
 
 def getContext():
     ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)   
@@ -31,7 +41,7 @@ def getContext():
 
 class CongregateProtocol1:
     def __init__(self):
-        self.b = BPConProtocol(peer_certs, logger) 
+        self.b = BPConProtocol(peer_certs, logger, peerlist) 
         self.c = CongregateProtocol()
         self.c.parent = self
         self.paxos_server = websockets.serve(self.b.main_loop, ip_addr, port, ssl=getContext())
@@ -51,9 +61,11 @@ class CongregateProtocol1:
 #        self.c.commit("hello4")
 #        self.c.commit("hello5")
         self.loop.close()
+        print("Pending tasks after close: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop()))
     def shutdown(self):
         self.paxos_server.close()
         self.congregate_server.close()
+        print("Pending tasks after shutdown: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop()))
 
 class CongregateProtocol:
     @asyncio.coroutine
@@ -80,7 +92,7 @@ class CongregateProtocol:
     def db_commit(self, msg, future):
         try:
             a = yield from self.parent.b.phase1a(msg, future)
-        
+            print(a) 
         except asyncio.TimeoutError:
             logger.info("db commit timed out")
             print("{}".format(a))
@@ -95,9 +107,6 @@ class CongregateProtocol:
                 logger.info("future cancelled")
         else:    
             logger.info("future not done ???")
-
-        #print("Pending tasks: %s" % asyncio.Task.all_tasks(self.parent.loop))    
-            
 
 def tester():
     try:
