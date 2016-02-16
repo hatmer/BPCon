@@ -3,6 +3,11 @@ import websockets
 import logging
 import ssl
 import time
+
+from Crypto.Signature import PKCS1_v1_5
+from Crypto.Hash import SHA
+from Crypto.PublicKey import RSA
+
 #self.logger = logging.getLogger('websockets')
 #self.logger.setLevel(logging.CRITICAL)
 #self.logger.addHandler(logging.StreamHandler())
@@ -27,7 +32,7 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self, peer_certs, logger, peers):
+    def __init__(self, peer_certs, keyfile, logger, peers):
         self.logger = logger
         self.peer_certs = peer_certs
         self.maxBal = -1
@@ -39,6 +44,8 @@ class BPConProtocol:
         self.peers = RoutingManager(peers)
         self.Q = None
         self.val = ""
+        key = RSA.importKey(open(keyfile).read())
+        self.signer = PKCS1_v1_5.new(key)
         self.pending = None
         self.ctx = get_ssl_context(self.peer_certs)
 
@@ -91,10 +98,15 @@ class BPConProtocol:
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
         self.logger.debug("sending 1b -> {}".format(N))
-        tosend = "{}&1b&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
+        msg_1b = "{}&1b&{}&{}&{}&".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
         if (int(N) > int(self.maxBal)): #maxbal undefined behavior sometimes 
             self.maxBal = N
-        tosend = tosend + "&mysig"
+        
+        msg_hash = SHA.new(msg_1b.encode())
+        sig = self.signer.sign(msg_hash)
+        print(type(sig))
+        tosend = msg_1b + str(int.from_bytes(sig, byteorder='little'))
+        print(type(tosend))
         return tosend
             
     def phase1c(self, val):
@@ -153,6 +165,7 @@ class BPConProtocol:
         timestamp = parts[0]
         msg_type = parts[1]
         N = int(parts[2])
+
         
         if msg_type == "1a" and num_parts == 3:
             # a peer is leader for a ballot, requesting votes
@@ -163,7 +176,6 @@ class BPConProtocol:
             # implies is leader for ballot, has quorum object
             self.logger.debug("got 1b!!!")
             [mb,mv,sig] = parts[3:6]
-
             # do stuff with v and 2avs
             # update avs structure here for newest ballot number for value
             self.Q.add_1b(N,int(mb), mv, sig)
@@ -172,6 +184,7 @@ class BPConProtocol:
             self.logger.debug("got 1c")
             [N,v,sigs] = parts[2:5]
             signatures = sigs.split(',')
+            print(len(signatures))
             if len(signatures) <= self.peers.num_peers:
                 for sig in signatures:
                     # test against pubkey

@@ -41,7 +41,7 @@ def getContext():
 
 class CongregateProtocol1:
     def __init__(self):
-        self.b = BPConProtocol(peer_certs, logger, peerlist) 
+        self.b = BPConProtocol(peer_certs, keyfile, logger, peerlist) 
         self.c = CongregateProtocol()
         self.c.parent = self
         self.paxos_server = websockets.serve(self.b.main_loop, ip_addr, port, ssl=getContext())

@@ -9,15 +9,15 @@ from logging.config import fileConfig
 from BPCon.protocol import BPConProtocol
 
 #FORMAT = '%(levelname)s %(asctime)-15s [%(filename)s %(funcName)s] %(message)s'
-#FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
-#logging.basicConfig(format=FORMAT)
+FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
+logging.basicConfig(format=FORMAT)
 
-logger = logging.getLogger('websockets')
-logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.StreamHandler())
+#logger = logging.getLogger('websockets')
+#logger.setLevel(logging.DEBUG)
+#logger.addHandler(logging.StreamHandler())
 
-#fileConfig('logging_config.ini')
-#logger = logging.getLogger()
+fileConfig('logging_config.ini')
+logger = logging.getLogger()
 
 configFile = sys.argv[1] # TODO improve
 config = configparser.ConfigParser()
@@ -41,7 +41,7 @@ def getContext():
 
 class CongregateProtocol1:
     def __init__(self):
-        self.b = BPConProtocol(peer_certs, logger, peerlist) 
+        self.b = BPConProtocol(peer_certs, keyfile, logger, peerlist) 
         self.c = CongregateProtocol()
         self.c.parent = self
         self.paxos_server = websockets.serve(self.b.main_loop, ip_addr, port, ssl=getContext())
