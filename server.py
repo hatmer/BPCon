@@ -4,20 +4,20 @@ import logging
 import ssl
 import configparser
 import sys
-
+import hashlib
 from logging.config import fileConfig
 from BPCon.protocol import BPConProtocol
 
 #FORMAT = '%(levelname)s %(asctime)-15s [%(filename)s %(funcName)s] %(message)s'
-#FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
-#logging.basicConfig(format=FORMAT)
+FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
+logging.basicConfig(format=FORMAT)
 
-logger = logging.getLogger('websockets')
-logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.StreamHandler())
+#logger = logging.getLogger('websockets')
+#logger.setLevel(logging.DEBUG)
+#logger.addHandler(logging.StreamHandler())
 
-#fileConfig('logging_config.ini')
-#logger = logging.getLogger()
+fileConfig('logging_config.ini')
+logger = logging.getLogger()
 
 configFile = sys.argv[1] # TODO improve
 config = configparser.ConfigParser()
@@ -26,13 +26,15 @@ config.read(configFile)
 ip_addr = config['network']['ip_addr']
 port = int(config['network']['port'])
 
-peerlist = {}
+peerlist = []
 for key,val in config.items('peers'):
-    peerlist[key] = val
+    wss = "wss://"+key+":"+val
+    peerlist.append(wss) 
 
 peer_certs = config['creds']['peer_certs']
 certfile = config['creds']['certfile']
 keyfile = config['creds']['keyfile']
+peer_keys = config['creds']['peer_keys']
 
 def getContext():
     ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)   
@@ -41,7 +43,7 @@ def getContext():
 
 class CongregateProtocol1:
     def __init__(self):
-        self.b = BPConProtocol(peer_certs, keyfile, logger, peerlist) 
+        self.b = BPConProtocol(peer_certs, keyfile, logger, peerlist, peer_keys) 
         self.c = CongregateProtocol()
         self.c.parent = self
         self.paxos_server = websockets.serve(self.b.main_loop, ip_addr, port, ssl=getContext())
@@ -79,13 +81,13 @@ class CongregateProtocol:
     @asyncio.coroutine
     def db_commit(self, msg, future):
         try:
-            a = yield from self.parent.b.phase1a(msg, future)
-            print(a) 
+            yield from self.parent.b.phase1a(msg, future)
         except asyncio.TimeoutError:
             logger.info("db commit timed out")
             print("{}".format(a))
         except asyncio.CancelledError:
             logger.info("db commit future cancelled")
+
     def got_commit_result(self, future):
         if future.done():
             #do cleanup

@@ -1,2 +1,3 @@
 maxballot increases even for failed 1a send
 verify 2b successfully sent before updating mBal and mVal
+no_network sleep timer

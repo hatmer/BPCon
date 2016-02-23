@@ -1,4 +1,8 @@
-
+import hashlib
+import os
+from Crypto.Signature import PKCS1_v1_5
+from Crypto.Hash import SHA
+from Crypto.PublicKey import RSA
 
 class RoutingManager(object):
     """
@@ -8,31 +12,69 @@ class RoutingManager(object):
     
     manages peer pubkeys and certificates
     
-    
-
     """
-    def __init__(self, initlist={}):
-        self.peers = initlist           #dict of ip:wss
-        self.num_peers = len(initlist)
+    def __init__(self, initlist=[], key_dir="/"):
+        self.peers = {}
+        for wss in initlist:
+            fname = key_dir + self.get_ID(wss)+".pubkey"
+            if os.path.exists(fname):
+                #read key and add pair to self.peers
+                with open(fname, 'r') as fh:
+                    self.peers[wss] = RSA.importKey(fh.read()) 
+            else:
+                print("missing key file for {}".format(wss))
+        
+        self.num_peers = len(self.peers)
 
-    def add_peer(self, ip, port, ID, key):
-        self.peers[ip] = "wss://"+str(ip)+":"+str(port)
-        s = "wss://"+str(ip)+":"+str(port)
-        print(s)
-        self.num_peers += 1
-        # write key to file
+    def get_ID(self, sock_str):
+        encoded =  hashlib.sha1(sock_str.encode())
+        return encoded.hexdigest()
 
-    def remove_peer(self, ip):
-        self.peers[ip] = None
-        self.num_peers -= 1
+    def add_peer(self, ip, port, key):
+        sock_str = "wss://"+str(ip)+":"+str(port)
+        ID = self.get_ID(sock_str)
+        if not sock_str in self.peers.keys():
+            key = str(key)
+            self.peers[sock_str] = RSA.importKey(key) #error check here
+            
+            # write key to file
+            with open(ID+".pubkey", 'w') as fh:
+                fh.write(key)
 
-    def get(self, ip):
-        return self.peers[ip]
+            self.num_peers += 1
+            return True
+
+        return False    
+
+
+    def remove_peer(self, wss):
+        if self.peers[wss]:
+            self.peers.pop(wss, None)
+            self.num_peers -= 1
+            return True
+        else:
+            print("remove failed")
+            return False
+
+    def get_key(self, wss):
+        return self.peers[wss]
     
     def get_all(self):
-        return self.peers.values()
-        #return [k+v for k,v in self.peers.items()]
-    
+        # returns list of addresses of peers in group
+        return self.peers.keys()
+
+    def verify_sigs(self, msglist):
+        num_verified = 0
+        
+        for item in msglist:
+            wss, msg, sig = item.split(';')
+            rsakey = self.peers[wss]
+            h = SHA.new(msg.encode())
+
+            sigmsg = int(sig).to_bytes(256, byteorder='little')
+            verifier = PKCS1_v1_5.new(rsakey)
+            return verifier.verify(h, sigmsg)
+
     def save_state(self):
         pass
     
