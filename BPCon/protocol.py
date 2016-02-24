@@ -11,7 +11,7 @@ from Crypto.PublicKey import RSA
 from BPCon.quorum import Quorum
 from BPCon.utils import get_ssl_context
 from BPCon.routing import RoutingManager
-
+from BPCon.storage import InMemoryStorage
 """
 ######### Message Formats ##########
 1a-N
@@ -35,12 +35,12 @@ class BPConProtocol:
         self.bmsgs = []         # log of messages sent by this instance
         self.peers = RoutingManager(peerlist, peer_keys)
         self.Q = None
-        self.val = ""
         with open(keyfile, 'r') as fh:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
         self.pending = None
         self.ctx = get_ssl_context(self.peer_certs)
+        self.db = InMemoryStorage()
 
     def shutdown(self):
         # clean shutdown
@@ -50,6 +50,13 @@ class BPConProtocol:
         # print stats
         pass
        
+    def update_db(self, val):
+        length, data = val.split('<>')
+        kvbytes = int(data).to_bytes(int(length), byteorder='little')
+        
+        k,v = kvbytes.decode().split(',')
+        self.db.put(k,v)
+
     def sentMsgs(self, type_, bal):
         pass
 
@@ -57,16 +64,19 @@ class BPConProtocol:
         pass
 
     @asyncio.coroutine
-    def phase1a(self, val, future):
+    def phase1a(self, proposal, future):
         # bmsgs := bmsgs U ("1a", bal)
         #if self.Q:
         #    self.logger.error("Bad Client: prior quorum being managed for ballot {}".format(self.Q.N))
-        
+        if not ',' in proposal:
+            self.logger.error("db commit proposal not in key,value format")
+            return
+
         self.maxBal += 1
         self.Q = Quorum(self.maxBal, self.peers.num_peers)
         self.logger.debug("creating Quorum object with N={}, num_peers={}".format(self.maxBal, self.peers.num_peers))
         self.pending = future
-        self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, val))
+        self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, proposal))
         msg_1a = "1a&{}&{}".format(str(time.time()),self.maxBal)
 
         yield from asyncio.async(self.send_msg(msg_1a))
@@ -78,11 +88,16 @@ class BPConProtocol:
             if self.Q.quorum_1b():
                 if self.Q.got_majority_accept():
                     self.logger.debug("quorum accepts")
-                    yield from self.send_msg(self.phase1c(val)) # send 1c
+                    val_bytes = proposal.encode()
+                    length = len(val_bytes)
+                    prepped_val = str(length)+"<>"+str(int.from_bytes(val_bytes, byteorder='little'))
+                    yield from self.send_msg(self.phase1c(prepped_val)) # send 1c
                     if self.Q.quorum_2b():
                         # Quorum Accepts and Commit succeeds case
                         res = "success"
-                        self.logger.info("Quorum Accepted Value {} at Ballot {}".format(val,self.Q.N))
+                        self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
+                        k,v = proposal.split(',')
+                        self.db.put(k,v)
                     else:
                          # Quorum Accepts then Commit fails case
                         res = "failure: quorum commit failure"    
@@ -133,7 +148,7 @@ class BPConProtocol:
             self.maxVBal = b
 
             self.logger.info("Value accepted by BPCon: {}".format(v))
-
+            self.update_db(v)
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
 
@@ -198,7 +213,7 @@ class BPConProtocol:
                 self.logger.debug("testing sig here...")
                 num_verified = self.peers.verify_sigs(signed_msgs)
                 
-                if num_verified >= self.Q.quorum:
+                if num_verified >= self.peers.quorum_size():
                     self.logger.debug("signature verification succeeded")
                     output_msg = self.phase2b(N,v)
                     return output_msg

@@ -28,6 +28,9 @@ class RoutingManager(object):
         
         self.num_peers = len(self.peers)
 
+    def quorum_size(self):
+        return int((self.num_peers / 2) + (self.num_peers % 2))
+
     def get_ID(self, sock_str):
         encoded =  hashlib.sha1(sock_str.encode())
         return encoded.hexdigest()

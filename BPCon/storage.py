@@ -8,8 +8,8 @@ class InMemoryStorage(object):
     def put(self, k, v):
         self.kvstore[k] = v
     def save_state(self): # need metadata here
-        with open("bpcon_storage.txt") as fh:
+        with open("data/bpcon_storage.txt") as fh:
             pickle.dumps(self.kvstore, fh)
     def load_state(self):
-        with open("bpcon_storage.txt") as fh:
+        with open("data/bpcon_storage.txt") as fh:
             self.kvstore = pickle.loads(fh)

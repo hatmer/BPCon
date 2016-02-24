@@ -54,12 +54,13 @@ class CongregateProtocol:
 
             x = 0
             while x < 100:
-                self.commit("hello{}".format(x))
+                self.commit("{},hello{}".format(x,x))
                 x += 1
         except Exception as e:
             logger.info(e)
 
     def shutdown(self):
+        print(self.b.db.kvstore)
         self.paxos_server.close()
         self.congregate_server.close()
 
@@ -112,7 +113,6 @@ def start():
         try:
             try:
                 asyncio.get_event_loop().run_forever()
-                
             except Exception as e:
                 logger.debug(e)
         except KeyboardInterrupt:
