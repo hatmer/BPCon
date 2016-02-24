@@ -28,11 +28,9 @@ class Quorum(object):
             self.commits += 1
 
     def quorum_2b(self):
-        print("commits: {}, quorum: {}".format(self.commits, self.quorum))
         return self.commits >= self.quorum
 
     def quorum_1b(self):
-        print("acceptors: {}, rejectors: {}, quorum: {}".format(self.acceptors, self.rejectors, self.quorum))
         # returns True if majority vote achieved
         return ((self.acceptors >= self.quorum) or (self.rejectors >= self.quorum))
 

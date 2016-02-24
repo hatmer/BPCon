@@ -56,15 +56,12 @@ class CongregateProtocol:
             while x < 100:
                 self.commit("hello{}".format(x))
                 x += 1
-                print(len(asyncio.Task.all_tasks(asyncio.get_event_loop())))
-            print("Pending tasks: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop()))
         except Exception as e:
             logger.info(e)
 
     def shutdown(self):
         self.paxos_server.close()
         self.congregate_server.close()
-        print("Pending tasks after shutdown: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop()))
 
     @asyncio.coroutine
     def server_loop(self, websocket, path):

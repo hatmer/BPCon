@@ -1,3 +1,6 @@
 maxballot increases even for failed 1a send
 verify 2b successfully sent before updating mBal and mVal
 no_network sleep timer
+live connections management
+log/db
+custom error handling in send_msg

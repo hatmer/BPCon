@@ -42,6 +42,14 @@ class BPConProtocol:
         self.pending = None
         self.ctx = get_ssl_context(self.peer_certs)
 
+    def shutdown(self):
+        # clean shutdown
+        # close server
+        # save routing state
+        # save db state
+        # print stats
+        pass
+       
     def sentMsgs(self, type_, bal):
         pass
 
@@ -124,7 +132,7 @@ class BPConProtocol:
             self.maxBal = b
             self.maxVBal = b
 
-            print(v)
+            self.logger.info("Value accepted by BPCon: {}".format(v))
 
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
@@ -148,7 +156,7 @@ class BPConProtocol:
                 self.logger.error("got bad input from peer")
         except Exception as e:
             self.logger.error("mainloop exception: {}".format(e))
-#        print("Pending tasks after mainloop: %s" % asyncio.Task.all_tasks(asyncio.get_event_loop()))    
+        self.logger.debug("Pending tasks after mainloop: %i" % len(asyncio.Task.all_tasks(asyncio.get_event_loop())))    
 
 
     def preprocess_msg(self, msg): # TODO verification
@@ -188,9 +196,9 @@ class BPConProtocol:
             if len(signed_msgs) <= self.peers.num_peers:
                 # test against pubkey
                 self.logger.debug("testing sig here...")
-                verified = self.peers.verify_sigs(signed_msgs)
-
-                if verified:
+                num_verified = self.peers.verify_sigs(signed_msgs)
+                
+                if num_verified >= self.Q.quorum:
                     self.logger.debug("signature verification succeeded")
                     output_msg = self.phase2b(N,v)
                     return output_msg
