@@ -53,7 +53,7 @@ class CongregateProtocol:
             self.loop.run_until_complete(self.congregate_server)
 
             x = 0
-            while x < 100:
+            while x < 10:
                 self.commit("{},hello{}".format(x,x))
                 x += 1
         except Exception as e:

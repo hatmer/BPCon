@@ -4,3 +4,4 @@ no_network sleep timer
 live connections management
 log/db
 custom error handling in send_msg
+verify runtime environment
