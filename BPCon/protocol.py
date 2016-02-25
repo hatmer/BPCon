@@ -50,11 +50,13 @@ class BPConProtocol:
         # print stats
         pass
        
-    def update_db(self, val):
-        length, data = val.split('<>')
-        kvbytes = int(data).to_bytes(int(length), byteorder='little')
+    def update(self, val):
+        if not ',' in val:
+            # requires unpackaging
+            length, data = val.split('<>')
+            val = int(data).to_bytes(int(length), byteorder='little').decode()
         
-        k,v = kvbytes.decode().split(',')
+        t,k,v = val.split(',')
         self.db.put(k,v)
 
     def sentMsgs(self, type_, bal):
@@ -96,8 +98,7 @@ class BPConProtocol:
                         # Quorum Accepts and Commit succeeds case
                         res = "success"
                         self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
-                        k,v = proposal.split(',')
-                        self.db.put(k,v)
+                        self.update(proposal)
                     else:
                          # Quorum Accepts then Commit fails case
                         res = "failure: quorum commit failure"    
@@ -148,7 +149,7 @@ class BPConProtocol:
             self.maxVBal = b
 
             self.logger.info("Value accepted by BPCon: {}".format(v))
-            self.update_db(v)
+            self.update(v)
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
 
@@ -233,6 +234,7 @@ class BPConProtocol:
         """
         client socket 
         """
+        good_peers = 0
         for ws in self.peers.get_all():
             try:
                 self.logger.debug("sending {} to {}".format(to_send, ws))
@@ -240,11 +242,13 @@ class BPConProtocol:
                 yield from client_socket.send(to_send)
                 input_msg = yield from client_socket.recv()
                 self.handle_msg(input_msg, ws)
+                good_peers += 1
             except Exception as e: # custom error handling
-                self.logger.info("send to peer {} failed".format(ws))
+                self.logger.debug("send to peer {} failed".format(ws))
             finally:
                 try:
                     yield from client_socket.close()
                 except Exception as e:
                     self.logger.debug("no socket to close")
-        
+
+        self.logger.info("Peers: {}/{}".format(good_peers, self.peers.num_peers))        

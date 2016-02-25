@@ -54,7 +54,7 @@ class CongregateProtocol:
 
             x = 0
             while x < 10:
-                self.commit("{},hello{}".format(x,x))
+                self.commit("D,{},hello{}".format(x,x))
                 x += 1
         except Exception as e:
             logger.info(e)
