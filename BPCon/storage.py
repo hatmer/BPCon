@@ -7,6 +7,8 @@ class InMemoryStorage(object):
         return self.kvstore[k]
     def put(self, k, v):
         self.kvstore[k] = v
+    def delete(self,k):
+        return self.kvstore.pop(k,None)
     def save_state(self): # need metadata here
         with open("data/bpcon_storage.txt") as fh:
             pickle.dumps(self.kvstore, fh)

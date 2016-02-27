@@ -24,21 +24,22 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self, conf):
-        self.logger = conf['logger']
+    def __init__(self, peer_certs, keyfile, logger, peerlist, peer_keys):
+        self.logger = logger
+        self.peer_certs = peer_certs
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
         self.maxVVal = None     # value voted for maxVBal
         self.avs = {}           # msg dict keyed by value (max ballot saved only)
         self.seen = {}          # 1b messages -> use to check if v is safe at b
         self.bmsgs = []         # log of messages sent by this instance
-        self.peers = RoutingManager(conf['peerlist'], conf['peer_keys'])
+        self.peers = RoutingManager(peerlist, peer_keys)
         self.Q = None
-        with open(conf['keyfile'], 'r') as fh:
+        with open(keyfile, 'r') as fh:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
         self.pending = None
-        self.ctx = get_ssl_context(conf['peer_certs'])
+        self.ctx = get_ssl_context(self.peer_certs)
         self.db = InMemoryStorage()
 
     def shutdown(self):

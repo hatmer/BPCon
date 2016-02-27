@@ -35,8 +35,8 @@ class RoutingManager(object):
         encoded =  hashlib.sha1(sock_str.encode())
         return encoded.hexdigest()
 
-    def add_peer(self, ip, port, key):
-        sock_str = "wss://"+str(ip)+":"+str(port)
+    def add_peer(self, sock_str, key):
+        #sock_str = "wss://"+str(ip)+":"+str(port)
         ID = self.get_ID(sock_str)
         if not sock_str in self.peers.keys():
             key = str(key)
