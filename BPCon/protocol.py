@@ -13,6 +13,10 @@ from BPCon.utils import get_ssl_context
 from BPCon.routing import RoutingManager
 from BPCon.storage import InMemoryStorage
 """
+Replicates changes to DB and group membership
+Sole purpose is to get consensus from group
+
+
 ######### Message Formats ##########
 1a-N
 1b-N-{v,-1}-set(2avmsgs in (val,bal) format)-sig
@@ -24,7 +28,7 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self, conf):
+    def __init__(self, conf, state):
         self.logger = conf['logger']
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
@@ -37,9 +41,10 @@ class BPConProtocol:
         with open(conf['keyfile'], 'r') as fh:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
-        self.pending = None
+        self.state = state
         self.ctx = get_ssl_context(conf['peer_certs'])
-        self.db = InMemoryStorage()
+
+        self.pending = None  # handle for state change results
 
     def shutdown(self):
         # clean shutdown
@@ -58,16 +63,20 @@ class BPConProtocol:
         
         t,k,v = val.split(',')
 
-        # check if k is a websocket, else its a key
+        # check if k is a websocket, else it's a key
         
         if t == 'A':
             self.peers.add_peer(k,v)
         elif t == 'R':
             self.peers.remove_peer(k)
         elif t == 'P':
-            self.db.put(k,v)
+            self.state.db.put(k,v)
         elif t == 'D':    
-            self.db.delete(k)
+            self.state.db.delete(k)
+        elif t == "L": # congregate requests lock on group operation
+            self.state.group_p1_lock = (k,v)
+            self.state.state = 'managing1'
+            self.logger.debug("set lock: {},{}".format(k,v))
 
     def sentMsgs(self, type_, bal):
         pass
@@ -90,11 +99,12 @@ class BPConProtocol:
         self.pending = future
         self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, proposal))
         msg_1a = "1a&{}&{}".format(str(time.time()),self.maxBal)
-
-        yield from asyncio.async(self.send_msg(msg_1a))
+        recipients = self.peers.get_all()
+        yield from asyncio.async(self.send_msg(msg_1a, recipients)) # collect stats here
         
         if self.pending.done():
             # Error case
+            res = "error: future done before voting complete"
             self.logger.error("future done before voting complete")
         else:
             if self.Q.quorum_1b():
@@ -103,7 +113,7 @@ class BPConProtocol:
                     val_bytes = proposal.encode()
                     length = len(val_bytes)
                     prepped_val = str(length)+"<>"+str(int.from_bytes(val_bytes, byteorder='little'))
-                    yield from self.send_msg(self.phase1c(prepped_val)) # send 1c
+                    yield from self.send_msg(self.phase1c(prepped_val), recipients) # send 1c
                     if self.Q.quorum_2b():
                         # Quorum Accepts and Commit succeeds case
                         res = "success"
@@ -121,6 +131,7 @@ class BPConProtocol:
 
         if not self.pending.done():
             self.pending.set_result(res)
+        return res
         
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
@@ -166,13 +177,13 @@ class BPConProtocol:
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         """
-        server socket for receiving 1a messages
+        server socket
         """ 
         self.logger.debug("main loop")
         # idle until receives network input
         try:
             input_msg = yield from websocket.recv()
-            self.logger.debug("< {}".format(input_msg))
+            #self.logger.debug("< {}".format(input_msg))
             output_msg = self.handle_msg(input_msg)
             if output_msg:
                 yield from websocket.send(output_msg)
@@ -240,25 +251,29 @@ class BPConProtocol:
             self.logger.info("non-paxos msg received")
 
     @asyncio.coroutine
-    def send_msg(self, to_send):
+    def send_msg(self, to_send, recipient_list):
         """
         client socket 
         """
         good_peers = 0
-        for ws in self.peers.get_all():
+        for ws in recipient_list:
             try:
-                self.logger.debug("sending {} to {}".format(to_send, ws))
+                #self.logger.debug("sending {} to {}".format(to_send, ws))
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
+                self.logger.debug("to_send: {}".format(to_send))
                 yield from client_socket.send(to_send)
+               
                 input_msg = yield from client_socket.recv()
+                self.logger.debug("input_msg: {}".format(input_msg))
                 self.handle_msg(input_msg, ws)
                 good_peers += 1
             except Exception as e: # custom error handling
-                self.logger.debug("send to peer {} failed".format(ws))
+                self.logger.debug("send to peer {} failed: {}".format(ws,e))
             finally:
                 try:
                     yield from client_socket.close()
                 except Exception as e:
                     self.logger.debug("no socket to close")
 
-        self.logger.info("Peers: {}/{}".format(good_peers, self.peers.num_peers))        
+        self.logger.info("Peers: {}/{}".format(good_peers, len(recipient_list)))     
+        # request remove failed peer 

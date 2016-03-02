@@ -1,6 +1,6 @@
 
 
-class Reconfigeror:
+class Reconfiguror:
     """
     Reconfiguration Algorithms
     -> gets stats from CongregateProtocol instance, returns action or None
@@ -21,8 +21,3 @@ class Reconfigeror:
     two adjacent groups
     -> ???
     """
-
-    def should_merge(self, group1, group2):
-        
-        pass
-    def should_migrate(self, 

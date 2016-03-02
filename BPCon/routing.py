@@ -15,14 +15,12 @@ class RoutingManager(object):
     """
     def __init__(self, initlist=[], key_dir="/"):
         self.peers = {}
-        self.uptime = {}
         for wss in initlist:
             fname = key_dir + self.get_ID(wss)+".pubkey"
             if os.path.exists(fname):
                 #read key and add pair to self.peers
                 with open(fname, 'r') as fh:
                     self.peers[wss] = RSA.importKey(fh.read()) 
-                    self.uptime[wss] = 0
             else:
                 print("missing key file for {}".format(wss))
         
@@ -41,7 +39,6 @@ class RoutingManager(object):
         if not sock_str in self.peers.keys():
             key = str(key)
             self.peers[sock_str] = RSA.importKey(key) #error check here
-            self.uptime[sock_str] = 0
             # write key to file
             with open(ID+".pubkey", 'w') as fh:
                 fh.write(key)
@@ -54,7 +51,6 @@ class RoutingManager(object):
     def remove_peer(self, wss):
         if self.peers[wss]:
             self.peers.pop(wss, None)
-            self.uptime.pop(wss, None)
             self.num_peers -= 1
             return True
         else:
@@ -79,13 +75,6 @@ class RoutingManager(object):
                 num_verified += 1
         
         return num_verified
-
-    def report_stats(self, wss, is_online): # 0 for false, 1 for true
-        # unresponsive peers recorded
-        self.uptime[wss] += is_online
-    
-    def print_stats(self):
-        print(self.uptime)
 
     def save_state(self):
         pass
