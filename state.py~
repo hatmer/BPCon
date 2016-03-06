@@ -13,8 +13,8 @@ class StateManager(object):
         
         self.db = InMemoryStorage()
 
-        self.group_p1_lock = None # format: (owner, op)
-        self.state = 'normal'
+        self.group_p1_hashval = None 
+        self.state = 'normal'     # normal, managing1, managing2, awaiting
 
         self.routing_cache = {}
 

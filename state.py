@@ -13,9 +13,9 @@ class StateManager(object):
         
         self.db = InMemoryStorage()
 
-        self.group_p1_lock = None # format: (owner, op)
+        self.group_p1_hashval = None 
         self.state = 'normal'     # normal, managing1, managing2, awaiting
-
+        self.state_timer = 0.0
         self.routing_cache = {}
 
     

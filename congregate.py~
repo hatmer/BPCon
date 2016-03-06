@@ -72,13 +72,12 @@ class Congregate:
           
 
             if conf['is_client']:
-                logger.debug("making request")
-                self.loop.run_until_complete(self.c.make_2pc_request("X,key,value"))
-                #x = 0
-                #while x < 10:
-                    
-                   # self.db_request("P,{},hello{}".format(x,x))
-                   # x += 1
+                logger.debug("making requests")
+                
+                for x in range(10):
+                    self.loop.run_until_complete(self.c.make_2pc_request("G,commit,value", []))#["wss://127.0.0.1:9002"]
+                    self.bpcon_commit("P,{},hello{}".format(x,x))
+                  
 
         except Exception as e:
             logger.info(e)
@@ -88,7 +87,7 @@ class Congregate:
         self.c.make_bpcon_request(msg)
 
     def shutdown(self):
-        print(self.bpcon.db.kvstore)
+        print(self.bpcon.state.db.kvstore) # save state here
         self.paxos_server.close()
         self.congregate_server.close()
     

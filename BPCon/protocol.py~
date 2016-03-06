@@ -54,17 +54,17 @@ class BPConProtocol:
         # print stats
         pass
        
-    def update(self, val):
+    def update(self, val, N):
         # application-specific shim
         if not ',' in val:
             # requires unpackaging
             length, data = val.split('<>')
             val = int(data).to_bytes(int(length), byteorder='little').decode()
-        
+       
         t,k,v = val.split(',')
-
+     
         # check if k is a websocket, else it's a key
-        
+        self.logger.info("Quorum Accepted Value {},{},{} at Ballot {}".format(t,k,v,N))
         if t == 'A':
             self.peers.add_peer(k,v)
         elif t == 'R':
@@ -73,10 +73,26 @@ class BPConProtocol:
             self.state.db.put(k,v)
         elif t == 'D':    
             self.state.db.delete(k)
-        elif t == "L": # congregate requests lock on group operation
-            self.state.group_p1_lock = (k,v)
-            self.state.state = 'managing1'
-            self.logger.debug("set lock: {},{}".format(k,v))
+        elif t == 'G': # congregate requests
+            if self.state.state == 'normal' and k == 'locked':
+                self.state.group_p1_hashval = v # TODO do something with key
+                self.state.state = 'locked'
+                self.logger.info("state is now locked. Locked value: {}".format(v))
+                
+            elif self.state.state == 'locked' and k == 'commit':
+                vhash = SHA.new(val.encode()).hexdigest()
+                if vhash == self.state.group_p1_hashval:
+                    self.logger.info("performing group operation!")
+                    self.state.state = 'normal'
+                    
+            else: # got bad group request
+                elapsed = time.time() - self.state.state_timer
+                if elapsed < 3:
+                    self.logger.info("
+                    self.state.state = 'normal'
+                else:
+                    self.logger.info("got bad group request: ignoring")
+                
 
     def sentMsgs(self, type_, bal):
         pass
@@ -92,15 +108,15 @@ class BPConProtocol:
         if not ',' in proposal:
             self.logger.error("db commit proposal not in key,value format")
             return
-
-        self.maxBal += 1
+      
+        self.maxBal = self.maxVBal + 1
         self.Q = Quorum(self.maxBal, self.peers.num_peers)
         self.logger.debug("creating Quorum object with N={}, num_peers={}".format(self.maxBal, self.peers.num_peers))
         self.pending = future
         self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, proposal))
         msg_1a = "1a&{}&{}".format(str(time.time()),self.maxBal)
         recipients = self.peers.get_all()
-        yield from asyncio.async(self.send_msg(msg_1a, recipients)) # collect stats here
+        yield from asyncio.async(self.send_msg(msg_1a, recipients, self.handle_msg)) # collect stats here
         
         if self.pending.done():
             # Error case
@@ -113,18 +129,20 @@ class BPConProtocol:
                     val_bytes = proposal.encode()
                     length = len(val_bytes)
                     prepped_val = str(length)+"<>"+str(int.from_bytes(val_bytes, byteorder='little'))
-                    yield from self.send_msg(self.phase1c(prepped_val), recipients) # send 1c
+                    yield from self.send_msg(self.phase1c(prepped_val), recipients, self.handle_msg) # send 1c
+                    self.maxVBal = self.Q.N
+                    self.maxVVal = proposal
                     if self.Q.quorum_2b():
                         # Quorum Accepts and Commit succeeds case
                         res = "success"
-                        self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
-                        self.update(proposal)
+                        #self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
+                        self.update(proposal, self.Q.N)
                     else:
                          # Quorum Accepts then Commit fails case
                         res = "failure: quorum commit failure"    
                 else:
                     # Quorum Rejects case
-                    res = "failure: quorum rejects"
+                    res = "failure: quorum rejects {} for ballot {}".format(proposal, self.Q.N)
 
             else:
                 res = "failure: no quorum"
@@ -135,16 +153,16 @@ class BPConProtocol:
         
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
-        msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
-        if (int(N) > int(self.maxBal)): #maxbal undefined behavior sometimes 
+        
+        if (int(N) > int(self.maxBal)): #maxbal type undefined behavior sometimes 
             self.maxBal = N
+            msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
+            msg_hash = SHA.new(msg_1b.encode())
+            sig = self.signer.sign(msg_hash)
         
-        msg_hash = SHA.new(msg_1b.encode())
-        sig = self.signer.sign(msg_hash)
-        
-        tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
-        self.logger.debug("sending 1b -> {}".format(tosend))
-        return tosend
+            tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
+            self.logger.debug("sending 1b -> {}".format(tosend))
+            return tosend
             
     def phase1c(self, val):
         # bmsgs := bmsgs U ("1c", bal, val)
@@ -162,15 +180,14 @@ class BPConProtocol:
 
     def phase2b(self, b, v):
         # bmsgs := bmsgs U ("2b", m.bal, m.val, acceptor)
-        if int(self.maxBal) <= int(b): # undefined maxbal here also
+        if int(self.maxBal) <= int(b): 
             # exists (2av, b) pairing in sentMsgs that quorum of acceptors agree upon
             
             self.maxVVal = v
             self.maxBal = b
             self.maxVBal = b
 
-            self.logger.info("Value accepted by BPCon: {}".format(v))
-            self.update(v)
+            self.update(v, b)
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
 
@@ -200,6 +217,7 @@ class BPConProtocol:
         
         return msg.split('&')
 
+    #def handle_ac_msg(self, msg, peer_wss
     def handle_msg(self, msg, peer_wss=None):    
         msg_type = msg[:2]
         if msg_type == "1c":
@@ -251,21 +269,23 @@ class BPConProtocol:
             self.logger.info("non-paxos msg received")
 
     @asyncio.coroutine
-    def send_msg(self, to_send, recipient_list):
+    def send_msg(self, to_send, recipient_list, handler_function=None):
         """
         client socket 
         """
         good_peers = 0
+        input_msg = None
         for ws in recipient_list:
             try:
                 #self.logger.debug("sending {} to {}".format(to_send, ws))
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
-                self.logger.debug("tosend: {}".format(tosend))
+                self.logger.debug("to_send: {}".format(to_send))
                 yield from client_socket.send(to_send)
                
                 input_msg = yield from client_socket.recv()
                 self.logger.debug("input_msg: {}".format(input_msg))
-                self.handle_msg(input_msg, ws)
+                if handler_function:
+                    handler_function(input_msg, ws)
                 good_peers += 1
             except Exception as e: # custom error handling
                 self.logger.debug("send to peer {} failed: {}".format(ws,e))
@@ -275,5 +295,7 @@ class BPConProtocol:
                 except Exception as e:
                     self.logger.debug("no socket to close")
 
+        if not handler_function:
+            return input_msg
         self.logger.info("Peers: {}/{}".format(good_peers, len(recipient_list)))     
         # request remove failed peer 
