@@ -56,7 +56,9 @@ class CongregateProtocol:
         msg = "0&"
         if request_type == "split":
             # action: divide group and keyspace in half
-                       
+            # 1. order peers by ip (wss), split
+            
+            opList = ["",""]       
             pass
         elif request_type == "remove_peer": 
             # action: change paxos routing membership
@@ -76,7 +78,7 @@ class CongregateProtocol:
                 # ks
                 pass
 
-        return msg
+        return "<>".join(opList)
             
 
     def got_commit_result(self, future):

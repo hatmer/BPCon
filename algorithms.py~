@@ -21,3 +21,26 @@ class Reconfiguror:
     two adjacent groups
     -> ???
     """
+    def __init__(self, state):
+        self.state  = state
+        self.groups = ['G0','G1','G2']
+
+    def print_status(self):
+        # latencies
+        print("Peer Latencies:")
+        for group in self.groups:
+            pass
+        # measure of IP distributedness
+        # group sizes keyspaces
+        for group in self.groups:
+            selector = self.state.groups[group]
+            print("{}: {} peers, {} keyspace".format(group,len(selector.peers),selector.keyspace))
+        
+        
+        # failed peers removal history
+        # bad peers removal history
+        
+    def should_merge(self, group1, group2):
+     
+        pass
+    def should_migrate(self, 

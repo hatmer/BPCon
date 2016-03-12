@@ -74,8 +74,8 @@ class Congregate:
             if conf['is_client']:
                 logger.debug("making requests")
                 
-                for x in range(10):
-                    self.loop.run_until_complete(self.c.make_2pc_request("G,commit,value", []))#["wss://127.0.0.1:9002"]
+                for x in range(1):
+                    self.loop.run_until_complete(self.c.make_2pc_request("G,commit,M;G0;wss://localhost:9000;G1", []))#["wss://127.0.0.1:9002"]
                     self.c.bpcon_commit("P,{},hello{}".format(x,x))
                   
 
@@ -90,6 +90,8 @@ class Congregate:
         print(self.bpcon.state.db.kvstore) # save state here
         self.paxos_server.close()
         self.congregate_server.close()
+        for item in self.state.groups:
+            print(item.peers+"\n")
     
     def direct_msg(self, msg):
         msg_type = msg[0]

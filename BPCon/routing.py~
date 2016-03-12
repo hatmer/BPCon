@@ -61,7 +61,7 @@ class RoutingManager(object):
     def get_all(self):
         # returns list of addresses of peers in group
         return self.peers.keys()
-
+    def get(self, wss):
         
     def verify_sigs(self, msglist):
         num_verified = 0

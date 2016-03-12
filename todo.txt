@@ -6,3 +6,4 @@ log/db
 custom error handling in send_msg
 verify runtime environment
 2b verify val
+timestamps for group ops

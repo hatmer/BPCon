@@ -35,16 +35,42 @@ class BPConProtocol:
         self.maxVVal = None     # value voted for maxVBal
         self.avs = {}           # msg dict keyed by value (max ballot saved only)
         self.seen = {}          # 1b messages -> use to check if v is safe at b
-        self.bmsgs = []         # log of messages sent by this instance
-        self.peers = RoutingManager(conf['peerlist'], conf['peer_keys'])
+        self.bmsgs = []         # log of messages sent by this instance       
         self.Q = None
         with open(conf['keyfile'], 'r') as fh:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
+
+        self.peers = RoutingManager(conf['peerlist'], conf['peer_keys'])
         self.state = state
+        self.state.groups['G0'] = self.peers
         self.ctx = get_ssl_context(conf['peer_certs'])
         self.pending = None
-       
+
+    def group_update(self, opList):
+        # TODO modify for rollbackable
+        self.logger.info("performing group operations: {}".format(opList))
+        try:
+            for item in opList.split('<>'): #  keyspace and group membership
+                t,g,a,b = item.split(';') # t is type, g is Group#
+                if g not in ['G0', 'G1', 'G2']:
+                    raise ValueError("key is not a valid group")
+                if t == 'A': # Adding peer: a is wss, b is key
+                    self.state.groups[g].add_peer(a,b)
+                elif t == 'R': # Removing peer: a is wss, b is placeholder
+                    self.state.groups[g].remove_peer(a)
+                elif t == 'K': # Keyspace update: a is lower, b is upper
+                    self.state.groups[g].keyspace = (float(a),float(b))
+                elif t == 'M': # Migrate peer: a is wss, b is destination group
+                    pubkey = self.state.groups[g].peers[a]
+                    self.state.groups[b].peers[a] = pubkey
+                    self.state.groups[g].remove_peer(a)
+                else:
+                    print(item)
+
+        except Exception as e:
+            self.logger.info("got bad value in group update: {}".format(e))
+
     def update(self, val, N):
         # application-specific shim
         if not ',' in val:
@@ -56,11 +82,7 @@ class BPConProtocol:
      
         # check if k is a websocket, else it's a key
         self.logger.info("Quorum Accepted Value {},{},{} at Ballot {}".format(t,k,v,N))
-        if t == 'A':
-            self.peers.add_peer(k,v)
-        elif t == 'R':
-            self.peers.remove_peer(k)
-        elif t == 'P':
+        if t == 'P':
             self.state.db.put(k,v)
         elif t == 'D':    
             self.state.db.delete(k)
@@ -71,12 +93,12 @@ class BPConProtocol:
                     self.state.group_p1_hashval = v
                     self.state.state = 'locked'
                     self.state.state_timer = time.time()
-                    self.logger.info("state is now locked. Locked value: {}".format(v))
+                    self.logger.debug("state is now locked. Locked value: {}".format(v))
               
-            elif self.state.state == 'locked' and k == 'commit':
+            elif self.state.state == 'locked' and k == 'commit':            
                 vhash = SHA.new(val.encode()).hexdigest()
-                if vhash == self.state.group_p1_hashval:
-                    self.logger.info("performing group operation!")
+                if vhash == self.state.group_p1_hashval:                  
+                    self.group_update(v)
                     self.state.state = 'normal'
                     
             else:

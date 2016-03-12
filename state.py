@@ -4,18 +4,22 @@ from BPCon.storage import InMemoryStorage
 
 class StateManager(object):
     def __init__(self, init_state=None):
-        self.G0_keyspace = (0,1)
-        self.G1_keyspace = (0,0)
-        self.G2_keyspace = (0,0)
-        self.G0_peers = RoutingManager() # initlist and keydir
-        self.G1_peers = RoutingManager()
-        self.G2_peers = RoutingManager()
+        self.groups = {}
+        self.groups['G0'] = None 
+        self.groups['G1'] = RoutingManager()
+        self.groups['G2'] = RoutingManager()
         
         self.db = InMemoryStorage()
 
         self.group_p1_hashval = None 
         self.state = 'normal'     # normal, managing1, managing2, awaiting
         self.state_timer = 0.0
+        
+        
+        # local stats
         self.routing_cache = {}
+        self.peer_latencies = (0,0) # (# records, weighted average)
+        self.client_latencies = (0,0)
+        self.failed_peers = {}
+        self.bad_peers = {}
 
-    
