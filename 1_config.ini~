@@ -12,5 +12,5 @@ localhost:9000
 [creds]
 certfile   = creds/keys1/server.crt
 keyfile    = creds/keys1/server.key
-peer_certs = creds/peers/certs/
-peer_keys  = creds/peers/pubkeys/
+peer_certs = creds/trusted/certs/
+peer_keys  = creds/trusted/pubkeys/

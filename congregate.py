@@ -9,57 +9,27 @@ Handles client requests
 
 import asyncio
 import websockets
-import logging
-import ssl
-import configparser
 import sys
 import hashlib
 import time
-from logging.config import fileConfig
+
 from BPCon.protocol import BPConProtocol
 from congregateProtocol import CongregateProtocol
 from state import StateManager
+from configManager import ConfigManager
 
-FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
-logging.basicConfig(format=FORMAT)
+if len(sys.argv) != 2:
+    print("invalid initialization parameters")
 
-fileConfig('logging_config.ini')
-logger = logging.getLogger()
-configFile = sys.argv[1] # TODO improve
-
-def load_config():
-    
-    config = configparser.ConfigParser()
-    config.read(configFile)
-
-    conf = {}
-    conf['ip_addr'] = config['network']['ip_addr']
-    conf['port'] = int(config['network']['port'])
-
-    conf['peerlist'] = []
-    for key,val in config.items('peers'):
-        wss = "wss://"+key+":"+val
-        conf['peerlist'].append(wss) 
-    
-    conf['peer_certs'] = config['creds']['peer_certs']
-    conf['certfile'] = config['creds']['certfile']
-    conf['keyfile'] = config['creds']['keyfile']
-    conf['peer_keys'] = config['creds']['peer_keys']
-
-    ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-    ctx.load_cert_chain(certfile=conf['certfile'], keyfile=conf['keyfile'])
-    conf['ssl'] = ctx
-    conf['logger'] = logger
-
-    conf['is_client'] = int(config['testing']['is_client'])
-    return conf
-
+configFile = sys.argv[1] # TODO remove
 
 
 class Congregate:
     def __init__(self):
         try:
-            conf = load_config()
+            self.cm = ConfigManager()
+            conf = self.cm.load_config(configFile) 
+            self.logger = conf['logger']
             self.state = StateManager()
             self.loop = asyncio.get_event_loop()
             self.bpcon = BPConProtocol(conf, self.state) 
@@ -72,7 +42,7 @@ class Congregate:
           
 
             if conf['is_client']:
-                logger.debug("making requests")
+                self.logger.debug("making requests")
                 
                 for x in range(1):
                     self.loop.run_until_complete(self.c.make_2pc_request("G,commit,M;G0;wss://localhost:9000;G1", []))#["wss://127.0.0.1:9002"]
@@ -80,18 +50,18 @@ class Congregate:
                   
 
         except Exception as e:
-            logger.info(e)
+            self.logger.info(e)
 
     def db_request(self, msg):
-        logger.debug("db commit initiated")
+        self.logger.debug("db commit initiated")
         self.c.make_bpcon_request(msg)
 
     def shutdown(self):
         print(self.bpcon.state.db.kvstore) # save state here
         self.paxos_server.close()
         self.congregate_server.close()
-        for item in self.state.groups:
-            print(item.peers+"\n")
+        for gname, rmgr in self.state.groups.items():
+            print("{}: {}".format(gname, list(rmgr.peers.keys())))
     
     def direct_msg(self, msg):
         msg_type = msg[0]
@@ -119,7 +89,7 @@ class Congregate:
     def mainloop(self, websocket, path):
         try:
             input_msg = yield from websocket.recv()
-            logger.debug("< {}".format(input_msg))
+            self.logger.debug("< {}".format(input_msg))
             output_msg = self.direct_msg(input_msg)
             if output_msg:
                 yield from websocket.send(output_msg)
@@ -134,8 +104,6 @@ class Congregate:
             self.logger.error("mainloop exception: {}".format(e))
 
 
-
-
 def start():
     try:
         c = Congregate()
@@ -143,14 +111,14 @@ def start():
             try:
                 asyncio.get_event_loop().run_forever()
             except Exception as e:
-                logger.debug(e)
+                c.logger.debug(e)
         except KeyboardInterrupt:
             c.shutdown()
             print('done')
         finally:
             asyncio.get_event_loop().close()
     except Exception as e:
-        logger.debug(e)
+        print(e)
 
 start()  
 
