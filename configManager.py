@@ -1,3 +1,8 @@
+"""
+Reads configuration for congregate, bpcon, and logging
+Creates any missing credential files (in linux only)
+"""
+
 import configparser
 import ssl
 import logging
@@ -63,6 +68,8 @@ class ConfigManager:
             shell("openssl req -new -subj '/C=SE/ST=XX/L=XX/O=XX/CN=localhost' -key creds/local/server.key -out creds/local/server.csr")
             shell("openssl x509 -req -days 365 -in creds/local/server.csr -signkey creds/local/server.key -out creds/local/server.crt")
             
+        conf['MAX_GROUP_SIZE'] = int(self.config['vars']['MAX_GROUP_SIZE'])
+
         return conf
     
     def save_config(self):

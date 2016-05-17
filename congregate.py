@@ -30,24 +30,33 @@ class Congregate:
             self.cm = ConfigManager()
             conf = self.cm.load_config(configFile) 
             self.logger = conf['logger']
+            self.logger.info("Loaded config")
             self.state = StateManager()
+            self.logger.info("Loaded state")
+            
             self.loop = asyncio.get_event_loop()
-            self.bpcon = BPConProtocol(conf, self.state) 
-            self.c = CongregateProtocol(self.loop, conf, self.bpcon)       
+            self.bpcon = BPConProtocol(conf, self.state)
             self.paxos_server = websockets.serve(self.bpcon.main_loop, conf['ip_addr'], conf['port'], ssl=conf['ssl'])
+            self.loop.run_until_complete(self.paxos_server)
+            self.logger.info("Started BPCon")
+
+            self.c = CongregateProtocol(self.loop, conf, self.bpcon)       
             self.congregate_server = websockets.serve(self.c.main_loop, conf['ip_addr'], conf['port'] + 2, ssl=conf['ssl'])
             #self.web_server = websockets.serve(self.mainloop, conf['ip_addr'], conf['port'] + 1)
-            self.loop.run_until_complete(self.paxos_server)
             self.loop.run_until_complete(self.congregate_server)
-          
-
+            self.logger.info("Started Congregate")
+            
             if conf['is_client']:
-                self.logger.debug("making requests")
+                #self.c.reconfig()
+                self.logger.debug("is client. making requests")
                 
                 for x in range(1):
-                    self.loop.run_until_complete(self.c.make_2pc_request("G,commit,M;G0;wss://localhost:9000;G1", []))#["wss://127.0.0.1:9002"]
-                    self.c.bpcon_commit("P,{},hello{}".format(x,x))
-                  
+                    #self.loop.run_until_complete(self.c.make_2pc_request("G,commit,M;G0;wss://localhost:9000;G1", []))#["wss://127.0.0.1:9002"]
+                    request = "P,{},hello{}".format(x,x)
+                    print(request)
+                    self.loop.run_until_complete(self.c.bpcon_request(request))
+
+                self.logger.debug("requests complete")      
 
         except Exception as e:
             self.logger.info(e)
@@ -57,9 +66,11 @@ class Congregate:
         self.c.make_bpcon_request(msg)
 
     def shutdown(self):
-        print(self.bpcon.state.db.kvstore) # save state here
+        print("\nShutdown initiated...")
+        print("\nDatabase contents:\n{}".format(self.bpcon.state.db.kvstore)) # save state here
         self.paxos_server.close()
         self.congregate_server.close()
+        print("\nPeer Groups:")
         for gname, rmgr in self.state.groups.items():
             print("{}: {}".format(gname, list(rmgr.peers.keys())))
     
@@ -111,13 +122,15 @@ def start():
             try:
                 asyncio.get_event_loop().run_forever()
             except Exception as e:
+                print("mainloop exception")
                 c.logger.debug(e)
         except KeyboardInterrupt:
             c.shutdown()
-            print('done')
         finally:
             asyncio.get_event_loop().close()
+            print('\nShutdown complete')
     except Exception as e:
+        print("System failure")
         print(e)
 
 start()  

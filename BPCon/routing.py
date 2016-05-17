@@ -4,7 +4,7 @@ from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 
-class RoutingManager(object):
+class GroupManager(object):
     """
     This class manages peers for BPCon
 
@@ -15,7 +15,7 @@ class RoutingManager(object):
     """
     def __init__(self, initlist=[], key_dir="/"):
         self.peers = {}
-        self.keyspace = (0.0,0.0)
+        self.keyspace = (0.0,1.0)
         for wss in initlist:
             fname = key_dir + self.get_ID(wss)+".pubkey"
             if os.path.exists(fname):

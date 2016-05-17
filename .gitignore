@@ -1,5 +1,6 @@
 ### File Types ###
 
+*~
 *.swp
 BPCon/*.swp
 *.pyc
@@ -8,6 +9,7 @@ BPCon/*.swp
 
 ### Specific Files ###
 push.sh
+todo.txt
 
 ### Directories ###
 creds/

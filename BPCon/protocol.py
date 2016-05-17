@@ -10,7 +10,7 @@ from Crypto.PublicKey import RSA
 
 from BPCon.quorum import Quorum
 from BPCon.utils import get_ssl_context
-from BPCon.routing import RoutingManager
+from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
 """
 Replicates changes to DB and group membership
@@ -28,7 +28,11 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self, conf, state):
+    def __init__(self, conf_dict=conf, state_obj=state):
+        """
+        conf_dict -- dictionary with configuration variables
+        state_obj -- class object with update() function
+        """
         self.logger = conf['logger']
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
@@ -37,74 +41,17 @@ class BPConProtocol:
         self.seen = {}          # 1b messages -> use to check if v is safe at b
         self.bmsgs = []         # log of messages sent by this instance       
         self.Q = None
+        
         with open(conf['keyfile'], 'r') as fh:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
 
-        self.peers = RoutingManager(conf['peerlist'], conf['peer_keys'])
+        self.peers = GroupManager(conf['peerlist'], conf['peer_keys'])
         self.state = state
         self.state.groups['G0'] = self.peers
         self.ctx = get_ssl_context(conf['peer_certs'])
         self.pending = None
-
-    def group_update(self, opList):
-        # TODO modify for rollbackable
-        self.logger.info("performing group operations: {}".format(opList))
-        try:
-            for item in opList.split('<>'): #  keyspace and group membership
-                t,g,a,b = item.split(';') # t is type, g is Group#
-                if g not in ['G0', 'G1', 'G2']:
-                    raise ValueError("key is not a valid group")
-                if t == 'A': # Adding peer: a is wss, b is key
-                    self.state.groups[g].add_peer(a,b)
-                elif t == 'R': # Removing peer: a is wss, b is placeholder
-                    self.state.groups[g].remove_peer(a)
-                elif t == 'K': # Keyspace update: a is lower, b is upper
-                    self.state.groups[g].keyspace = (float(a),float(b))
-                elif t == 'M': # Migrate peer: a is wss, b is destination group
-                    pubkey = self.state.groups[g].peers[a]
-                    self.state.groups[b].peers[a] = pubkey
-                    self.state.groups[g].remove_peer(a)
-                else:
-                    print(item)
-
-        except Exception as e:
-            self.logger.info("got bad value in group update: {}".format(e))
-
-    def update(self, val, N):
-        # application-specific shim
-        if not ',' in val:
-            # requires unpackaging
-            length, data = val.split('<>')
-            val = int(data).to_bytes(int(length), byteorder='little').decode()
-       
-        t,k,v = val.split(',')
-     
-        # check if k is a websocket, else it's a key
-        self.logger.info("Quorum Accepted Value {},{},{} at Ballot {}".format(t,k,v,N))
-        if t == 'P':
-            self.state.db.put(k,v)
-        elif t == 'D':    
-            self.state.db.delete(k)
-        elif t == 'G': # congregate requests
-            if k == 'locked':
-                elapsed = time.time() - self.state.state_timer
-                if self.state.state == 'normal' or (self.state.state == 'locked' and elapsed > 3):
-                    self.state.group_p1_hashval = v
-                    self.state.state = 'locked'
-                    self.state.state_timer = time.time()
-                    self.logger.debug("state is now locked. Locked value: {}".format(v))
-              
-            elif self.state.state == 'locked' and k == 'commit':            
-                vhash = SHA.new(val.encode()).hexdigest()
-                if vhash == self.state.group_p1_hashval:                  
-                    self.group_update(v)
-                    self.state.state = 'normal'
-                    
-            else:
-                self.logger.info("got bad group request: ignoring")
-                
-
+    
     def sentMsgs(self, type_, bal):
         pass
 
@@ -112,7 +59,13 @@ class BPConProtocol:
         pass
 
     @asyncio.coroutine
-    def phase1a(self, proposal, future):
+    def request(self, proposal, future):
+        """
+        makes phase 1a proposal
+        manages successful ballots
+         state updates
+        returns succeed/fail boolean
+        """
         # bmsgs := bmsgs U ("1a", bal)
         #if self.Q:
         #    self.logger.error("Bad Client: prior quorum being managed for ballot {}".format(self.Q.N))
@@ -134,6 +87,7 @@ class BPConProtocol:
             res = "error: future done before voting complete"
             self.logger.error("future done before voting complete")
         else:
+            res = 0
             if self.Q.quorum_1b():
                 if self.Q.got_majority_accept():
                     self.logger.debug("quorum accepts")
@@ -145,18 +99,19 @@ class BPConProtocol:
                     self.maxVVal = proposal
                     if self.Q.quorum_2b():
                         # Quorum Accepts and Commit succeeds case
-                        res = "success"
+                        self.logger.info("2b success")
+                        res = 1
                         #self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
-                        self.update(proposal, self.Q.N)
+                        self.state.update(proposal, self.Q.N)
                     else:
-                         # Quorum Accepts then Commit fails case
-                        res = "failure: quorum commit failure"    
+                        # Quorum Accepts then Commit fails case
+                        self.logger.info("2b failure: quorum1 accepts but quorum2 failed")
                 else:
                     # Quorum Rejects case
-                    res = "failure: quorum rejects {} for ballot {}".format(proposal, self.Q.N)
+                    self.logger.info("failure: quorum1 rejects {} for ballot {}".format(proposal, self.Q.N))
 
             else:
-                res = "failure: no quorum"
+                self.logger.info("failure: quorum1 not acquired")
 
         if not self.pending.done():
             self.pending.set_result(res)
@@ -198,7 +153,7 @@ class BPConProtocol:
             self.maxBal = b
             self.maxVBal = b
 
-            self.update(v, b)
+            self.state.update(v, b)
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
 
