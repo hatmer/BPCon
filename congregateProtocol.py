@@ -12,7 +12,6 @@ makes state-change requests to peers through BPCon
 
 """
 import asyncio
-import pickle
 import time
 from Crypto.Hash import SHA
 from BPCon.routing import GroupManager
@@ -28,8 +27,6 @@ class CongregateProtocol:
         self.keyspace = (0,1)
         self.neighbors = [GroupManager(),GroupManager()]
         
-        self.backup = None # disc copy of db and routing state
-            
 
     def got_commit_result(self, future):
         if future.done():
@@ -148,7 +145,7 @@ class CongregateProtocol:
                 self.logger.error("no consensus on input from peer")
 
             # adapt here
-            self.reconfig()
+            #self.reconfig()
 
         except Exception as e:
             self.logger.error("mainloop exception: {}".format(e))
@@ -165,87 +162,6 @@ class CongregateProtocol:
     def groupmem_update(self, update):
         pass
 
-    def image_state(self):
-        # create disc copy of system state
-        backupData = [self.bpcon.state.db, self.bpcon.state.groups]
-        dataBytes = pickle.dumps(backupData)
-        dataInts = int.from_bytes(dataBytes, byteorder='little')
-
-        newBackup = str(int(time.time())) + "_backup.pkli"
-        with open(newBackup, 'w') as fh:
-            fh.write(dataInts)
-
-        self.backup = newBackup
-
-    def create_peer_request(self, request_type):
-       	"""
-        Internal group consensus messages for:
-            - split
-            - merge
-            - migrate
-            - keyspace change
-            - modify peer group membership
-
-        Message format:  local/other, change type, data
-
-        0: paxos operation
-        1: routing
-        2: congregate operation
-
-        1: keyspace
-        2: group membership
-        3: both
-
-        data: keyspace, groupmember sockets with corresponding keys
-
-        """
-        msg = "0&"
-        if request_type == "split":
-            # action: divide group and keyspace in half
-            # Initiator is in first group
-            # 1. get new groups and keyspaces
-            
-            opList = ["",""]
-            peers = sorted(self.bpcon.state.groups['G0'].peers)
-            l = int(len(peers)/2)
-            list_a = peers[:l]
-            list_b = peers[l:]
-
-            keyspace = self.bpcon.state.groups['G0'].keyspace
-
-            diff = (keyspace[1] - keyspace[0]) / 2
-            mid = keyspace[0] + diff
-            
-            k1 = (keyspace[0], mid)
-            k2 = (mid, keyspace[1])
-
-            # 2. 
-
-            print(list_a, list_b, k1, k2)
-            
-
-            #"G,commit, M;G0;wss://localhost:9000;G1" 
-            
-        elif request_type == "remove_peer": 
-            op = "G,commit,A;G0;{};{}".format(wss,None)
-            print(op)
-        elif request_type == "add_peer": 
-            op = "G,commit,A;G0;{};{}".format(wss,key)
-            print(op)
-        else: # multigroup operations 
-            msg = "2&"              
-            if request_type == "merge":
-                # ks, peerlist
-                pass
-            elif request_type == "migrate":
-                #"G,commit, M;G0;wss://localhost:9000;G1" 
-                pass
-            elif request_type == "keyspace":
-                # ks
-                pass
-
-        #return "<>".join(opList)
-
     def reconfig(self):
         """
         Autonomous Functions
@@ -255,13 +171,7 @@ class CongregateProtocol:
             - queue and reduce communications with other groups
             - image db and routing state
         """
-        # if groupsize > #, split
-        if len(self.bpcon.state.groups['G0'].peers) > self.conf['MAX_GROUP_SIZE']:
-            self.create_peer_request("split")
-        else:
-            self.logger.info("reconfig did nothing")
-            # sort by key, halve
-        # if groupsize < #, merge
+        self.logger.info("reconfig did nothing")
        
     
 

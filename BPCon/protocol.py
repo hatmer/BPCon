@@ -28,10 +28,10 @@ B: 1aMsg U 1bMsg U 1cMsg U 2avMsg U 2bMsg
 """
 
 class BPConProtocol:
-    def __init__(self, conf_dict=conf, state_obj=state):
+    def __init__(self, conf, state):
         """
-        conf_dict -- dictionary with configuration variables
-        state_obj -- class object with update() function
+        conf  -- dictionary with configuration variables
+        state -- class object with update() function
         """
         self.logger = conf['logger']
         self.maxBal = -1

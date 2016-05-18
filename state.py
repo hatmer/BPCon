@@ -1,7 +1,7 @@
 from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
 from Crypto.Hash import SHA
-
+import pickle
 class StateManager:
     def __init__(self): # init_state=None):
         self.groups = {}
@@ -20,6 +20,8 @@ class StateManager:
         self.peer_latencies = (0,0) # (# records, weighted average)
         self.failed_peers = {}
         self.bad_peers = {}
+
+        self.backup = None # disc copy of db and routing state
 
     def update(self, val, ballot_num):
         print("updating state: ballot #{}".format(ballot_num))
@@ -75,4 +77,17 @@ class StateManager:
         except Exception as e:
             self.logger.info("got bad value in group update: {}".format(e))
 
+
+
+    def image_state(self):
+        # create disc copy of system state
+        backupData = [self.bpcon.state.db, self.bpcon.state.groups]
+        dataBytes = pickle.dumps(backupData)
+        dataInts = int.from_bytes(dataBytes, byteorder='little')
+
+        newBackup = str(int(time.time())) + "_backup.pkli"
+        with open(newBackup, 'w') as fh:
+            fh.write(dataInts)
+
+        self.backup = newBackup
 
