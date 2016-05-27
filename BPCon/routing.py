@@ -3,6 +3,7 @@ import os
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
+from BPCon.utils import save_state, load_state
 
 class GroupManager(object):
     """
@@ -68,19 +69,23 @@ class GroupManager(object):
         
         for item in msglist:
             wss, msg, sig = item.split(';')
-            rsakey = self.peers[wss]
-            h = SHA.new(msg.encode())
+            if wss in self.peers:
+                
+                rsakey = self.peers[wss]
+                h = SHA.new(msg.encode())
 
-            sigmsg = int(sig).to_bytes(256, byteorder='little')
-            verifier = PKCS1_v1_5.new(rsakey)
-            if verifier.verify(h, sigmsg):
-                num_verified += 1
-        
+                sigmsg = int(sig).to_bytes(256, byteorder='little')
+                verifier = PKCS1_v1_5.new(rsakey)
+                if verifier.verify(h, sigmsg):
+                    num_verified += 1
+            else:        
+                print("missing a key for {}".format(wss))
+
         return num_verified
 
-    def save_state(self):
-        pass
+    def save(self):
+        save_state('data/bpcon_routing.pkl',(self.peers, self.keyspace))
     
     def load_state(self):
-        pass
+        (self.peers, self.keyspace) = load_state('data/bpcon_routing.pkl')
 

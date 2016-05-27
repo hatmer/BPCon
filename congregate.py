@@ -2,7 +2,7 @@
 Reads and maintains config file
 Starts paxos and congregate protocol instances
 Autonomous congregate functions loop
-Handles client requests
+Handles client requests (including join requests)
 
 
 """
@@ -23,47 +23,55 @@ if len(sys.argv) != 2:
 
 configFile = sys.argv[1] # TODO remove
 
-
 class Congregate:
     def __init__(self):
         try:
             self.cm = ConfigManager()
-            conf = self.cm.load_config(configFile) 
-            self.logger = conf['logger']
+            self.conf = self.cm.load_config(configFile) 
+            print('config loaded')
+            self.logger = self.conf['logger']
+            print(self.conf['logger'])
             self.logger.info("Loaded config")
-            self.state = StateManager()
+            self.state = StateManager(self.conf)
             self.logger.info("Loaded state")
             
             self.loop = asyncio.get_event_loop()
-            self.bpcon = BPConProtocol(conf, self.state)
-            self.paxos_server = websockets.serve(self.bpcon.main_loop, conf['ip_addr'], conf['port'], ssl=conf['ssl'])
+            self.bpcon = BPConProtocol(self.conf, self.state)
+            self.paxos_server = websockets.serve(self.bpcon.main_loop, self.conf['ip_addr'], self.conf['port'], ssl=self.conf['ssl'])
             self.loop.run_until_complete(self.paxos_server)
-            self.logger.info("Started BPCon")
+            self.logger.info("Started BPCon on port {}".format(self.conf['port']))
 
-            self.c = CongregateProtocol(self.loop, conf, self.bpcon)       
-            self.congregate_server = websockets.serve(self.c.main_loop, conf['ip_addr'], conf['port'] + 2, ssl=conf['ssl'])
-            #self.web_server = websockets.serve(self.mainloop, conf['ip_addr'], conf['port'] + 1)
+            self.c = CongregateProtocol(self.loop, self.conf, self.bpcon)       
+            self.congregate_server = websockets.serve(self.c.main_loop, self.conf['ip_addr'], self.conf['port']+1, ssl=self.conf['ssl'])
             self.loop.run_until_complete(self.congregate_server)
-            self.logger.info("Started Congregate")
-            
-            if conf['is_client']:
+            self.logger.info("Started Congregate on port {}".format(self.conf['port']+1))
+
+            self.web_server = websockets.serve(self.mainloop, self.conf['ip_addr'], self.conf['port']+2) 
+            self.loop.run_until_complete(self.web_server)
+            self.logger.info("Started Web Server on port {}".format(self.conf['port']+2))
+
+            if self.conf['is_client']:
                 #self.c.reconfig()
-                self.logger.debug("is client. making requests")
+                self.logger.debug("is client. making test requests")
                 
                 for x in range(1):
-                    #self.loop.run_until_complete(self.c.make_2pc_request("G,commit,M;G0;wss://localhost:9000;G1", []))#["wss://127.0.0.1:9002"]
-                    request = "P,{},hello{}".format(x,x)
-                    print(request)
-                    self.loop.run_until_complete(self.c.bpcon_request(request))
+                    #request = "P,{},hello{}".format(x,x)
+                    request = self.c.create_peer_request("split")
+                    self.logger.debug("request is {}".format(request))
+                    self.local_request(request)
 
-                self.logger.debug("requests complete")      
+                self.logger.debug("requests complete")     
 
         except Exception as e:
             self.logger.info(e)
 
-    def db_request(self, msg):
+    def local_request(self, msg):
         self.logger.debug("db commit initiated")
-        self.c.make_bpcon_request(msg)
+        self.loop.run_until_complete(self.c.bpcon_request(msg))
+
+    def group_request(self, msg):
+        self.logger.debug("group request initiated")
+        self.loop.run_until_complete(self.c.make_2pc_request(msg))
 
     def shutdown(self):
         print("\nShutdown initiated...")
@@ -80,11 +88,11 @@ class Congregate:
         # 0 -> bpcon
             return "hello"
         elif msg_type == '1': #custom or https -> serve or register and pass to congregate
-        # 1 -> db get
+        # 1 -> congregate
             return "hello"
         elif msg_type == '2': 
-        # 2 -> congregate
-            return "hello"
+        # 2 -> external request
+            self.handle_external_request(msg[1:])    
         # Client Request Handling
 
     def handle_db_request(self, request):
@@ -94,14 +102,48 @@ class Congregate:
         # self.db.get(k)
         pass
 
+    def handle_external_request(self, msg):
+        # client API requests and peer join requests
+        if len(msg) < 4:
+            self.logger.info("bad external request: too short")
+        else:    
+            msg_type = msg[0]
+            try:
+                a,b = msg[1:].split('<>')
+            except Exception as e:
+                self.logger.info("bad external request: malformed")
+
+            if msg_type == '0': # API request
+                selector,key = a[0],a[1:]
+
+                if selector == '0': # GET
+                    #first check cache
+                    self.state.db.get(key)
+                elif selector == '1': # PUT
+                    self.local_request("P,{},{}".format(key,b))
+                elif selector == '2': # DEL
+                    self.local_request("D,{},{}".format(key,"null"))
+                else: # malformed
+                    self.logger.info("bad API request")
         
+            elif msg_type == '1': # Join request 
+                # TODO test wss
+                # add to local routing table.
+                self.local_request("A,{},{}".format(k,v)) # a is wss, b is key
+                # notify congregate
+                self.c.handle_join(wss,key)
+            
 
     @asyncio.coroutine
     def mainloop(self, websocket, path):
         try:
             input_msg = yield from websocket.recv()
             self.logger.debug("< {}".format(input_msg))
-            output_msg = self.direct_msg(input_msg)
+            if self.conf['use_single_port']:
+                output_msg = self.direct_msg(input_msg)
+            else:#using this port for external requests only
+                output_msg = yield from self.handle_external_request(input_msg)
+                
             if output_msg:
                 yield from websocket.send(output_msg)
                 #self.bmsgs.append(output_msg)
@@ -123,7 +165,7 @@ def start():
                 asyncio.get_event_loop().run_forever()
             except Exception as e:
                 print("mainloop exception")
-                c.logger.debug(e)
+                c.logger.error(e)
         except KeyboardInterrupt:
             c.shutdown()
         finally:

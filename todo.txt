@@ -9,3 +9,5 @@ verify runtime environment
 timestamps for group ops
 logging streams
 configManager check os
+corrupt state -> cannot verify so requests bmsgs next round if still in same epoch
+dynamic config: bmsg requests, add_peer requests just get this (epochs(state image hashes)) - startup script requests current image from web portal

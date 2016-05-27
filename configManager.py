@@ -32,7 +32,7 @@ class ConfigManager:
         conf = {}
         conf['ip_addr'] = self.config['network']['ip_addr']
         conf['port'] = int(self.config['network']['port'])
-
+        conf['c_wss'] = "wss://"+conf['ip_addr'] +":"+ str(conf['port']+1)
         conf['peerlist'] = []
         for key,val in self.config.items('peers'):
             wss = "wss://"+key+":"+val
@@ -47,6 +47,8 @@ class ConfigManager:
         ctx.load_cert_chain(certfile=conf['certfile'], keyfile=conf['keyfile'])
         conf['ssl'] = ctx
         conf['is_client'] = int(self.config['testing']['is_client'])
+        
+        # Logging
         conf['logger'] = logger
 
         # verify credential file tree

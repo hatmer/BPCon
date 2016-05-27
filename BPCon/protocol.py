@@ -1,7 +1,6 @@
 import asyncio
 import websockets
 import logging
-import ssl
 import time
 
 from Crypto.Signature import PKCS1_v1_5
@@ -12,6 +11,7 @@ from BPCon.quorum import Quorum
 from BPCon.utils import get_ssl_context
 from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
+
 """
 Replicates changes to DB and group membership
 Sole purpose is to get consensus from group
@@ -48,7 +48,7 @@ class BPConProtocol:
 
         self.peers = GroupManager(conf['peerlist'], conf['peer_keys'])
         self.state = state
-        self.state.groups['G0'] = self.peers
+        self.state.groups['G1'] = self.peers
         self.ctx = get_ssl_context(conf['peer_certs'])
         self.pending = None
     
@@ -82,12 +82,12 @@ class BPConProtocol:
         recipients = self.peers.get_all()
         yield from asyncio.async(self.send_msg(msg_1a, recipients, self.handle_msg)) # collect stats here
         
+        res = 0
+
         if self.pending.done():
-            # Error case
-            res = "error: future done before voting complete"
+            # Error case (possibly unneccessary)
             self.logger.error("future done before voting complete")
         else:
-            res = 0
             if self.Q.quorum_1b():
                 if self.Q.got_majority_accept():
                     self.logger.debug("quorum accepts")
@@ -100,22 +100,24 @@ class BPConProtocol:
                     if self.Q.quorum_2b():
                         # Quorum Accepts and Commit succeeds case
                         self.logger.info("2b success")
-                        res = 1
                         #self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
-                        self.state.update(proposal, self.Q.N)
+                        try:
+                            self.state.update(proposal, self.Q.N)
+                            res = 1 # succeeded
+                        except Exception as e:
+                            self.logger.info("update failed!")
                     else:
                         # Quorum Accepts then Commit fails case
                         self.logger.info("2b failure: quorum1 accepts but quorum2 failed")
                 else:
                     # Quorum Rejects case
                     self.logger.info("failure: quorum1 rejects {} for ballot {}".format(proposal, self.Q.N))
-
             else:
                 self.logger.info("failure: quorum1 not acquired")
 
         if not self.pending.done():
             self.pending.set_result(res)
-        return res
+        return res # failed
         
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
@@ -166,7 +168,7 @@ class BPConProtocol:
         # idle until receives network input
         try:
             input_msg = yield from websocket.recv()
-            #self.logger.debug("< {}".format(input_msg))
+            self.logger.debug("< {}".format(input_msg))
             output_msg = self.handle_msg(input_msg)
             if output_msg:
                 yield from websocket.send(output_msg)
@@ -180,10 +182,8 @@ class BPConProtocol:
 
 
     def preprocess_msg(self, msg): # TODO verification
-        
         return msg.split('&')
 
-    #def handle_ac_msg(self, msg, peer_wss
     def handle_msg(self, msg, peer_wss=None):    
         msg_type = msg[:2]
         if msg_type == "1c":
@@ -238,10 +238,14 @@ class BPConProtocol:
     def send_msg(self, to_send, recipient_list, handler_function=None):
         """
         client socket 
+
+        returns list of latencies
         """
         good_peers = 0
+        peer_latencies = {}
         input_msg = None
         for ws in recipient_list:
+            send_start = time.time()
             try:
                 #self.logger.debug("sending {} to {}".format(to_send, ws))
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
@@ -249,12 +253,14 @@ class BPConProtocol:
                 yield from client_socket.send(to_send)
                
                 input_msg = yield from client_socket.recv()
+                peer_latencies[ws] = time.time() - send_start
                 self.logger.debug("input_msg: {}".format(input_msg))
                 if handler_function:
                     handler_function(input_msg, ws)
                 good_peers += 1
             except Exception as e: # custom error handling
                 self.logger.debug("send to peer {} failed: {}".format(ws,e))
+                peer_latencies[ws] = -1
             finally:
                 try:
                     yield from client_socket.close()
@@ -264,4 +270,5 @@ class BPConProtocol:
         if not handler_function:
             return input_msg
         self.logger.info("Peers: {}/{}".format(good_peers, len(recipient_list)))     
-        # request remove failed peer 
+        self.logger.info("Peer Latencies: {}".format(peer_latencies))
+         
