@@ -46,7 +46,7 @@ class BPConProtocol:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
 
-        self.peers = GroupManager(conf['peerlist'], conf['peer_keys'])
+        self.peers = GroupManager(conf)
         self.state = state
         self.state.groups['G1'] = self.peers
         self.ctx = get_ssl_context(conf['peer_certs'])

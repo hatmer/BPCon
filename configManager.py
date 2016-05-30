@@ -9,6 +9,7 @@ import logging
 from logging.config import fileConfig
 import os.path
 import subprocess
+from Crypto.PublicKey import RSA
 
 FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
 logging.basicConfig(format=FORMAT)
@@ -61,7 +62,7 @@ class ConfigManager:
             shell("mkdir creds/local")
         if not os.path.isfile('creds/local/server.key'):
             print("Generating private key")
-            shell("openssl genrsa -des3 -passout pass:x -out server.pass.key 2048")
+            shell("openssl genrsa -passout pass:x -out server.pass.key 2048")
             shell("openssl rsa -passin pass:x -in server.pass.key -out creds/local/server.key")
             shell("rm server.pass.key")
             shell("openssl rsa -in creds/local/server.key -pubout > creds/local/server.pub")

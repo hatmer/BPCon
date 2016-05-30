@@ -9,9 +9,9 @@ class StateManager:
         self.logger = conf['logger']
         self.addr = conf['c_wss']
         self.groups = {}
-        self.groups['G0'] = GroupManager() # (members, keyspace)
+        self.groups['G0'] = GroupManager(conf) # (members, keyspace)
         self.groups['G1'] = None
-        self.groups['G2'] = GroupManager()
+        self.groups['G2'] = GroupManager(conf)
         
         self.db = InMemoryStorage()
 

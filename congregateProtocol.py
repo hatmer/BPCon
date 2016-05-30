@@ -26,7 +26,6 @@ class CongregateProtocol:
         self.bpcon = bpcon
 
         self.keyspace = (0,1)
-        self.neighbors = [GroupManager(),GroupManager()]
         
 
     def got_commit_result(self, future):
@@ -150,11 +149,15 @@ class CongregateProtocol:
         except Exception as e:
             self.logger.error("mainloop exception: {}".format(e))
 
-
-    def handle_join(self, wss, key):
+    @asyncio.coroutine
+    def handle_join(self, wss, pubkey, cert):
         # ungrouped peer sent a join request
+        # test peer
+        # add to local routing table
+        request = "A,{},{}<>{}".format(wss,pubkey,cert)
+        added = yield from self.bpcon_request(request)
         # notifiy neighbors of membership change
-        pass
+        
 
     def keyspace_update(self, update):
         pass

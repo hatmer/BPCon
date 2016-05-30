@@ -53,12 +53,17 @@ class Congregate:
             if self.conf['is_client']:
                 #self.c.reconfig()
                 self.logger.debug("is client. making test requests")
-                
+                with open("creds/local/server.crt") as fh:
+                    cert = fh.read()
+                with open("creds/local/server.pub") as fh:
+                    pubkey = fh.read()
+                wss = "wss://localhost:8000"
                 for x in range(1):
                     #request = "P,{},hello{}".format(x,x)
-                    request = self.c.create_peer_request("split")
-                    self.logger.debug("request is {}".format(request))
-                    self.local_request(request)
+                    #request = self.c.create_peer_request("split")
+                    self.loop.run_until_complete(self.c.handle_join(wss,pubkey,cert))
+#                    self.logger.debug("request is {}".format(request))
+#                    self.local_request(request)
 
                 self.logger.debug("requests complete")     
 
@@ -102,37 +107,26 @@ class Congregate:
         # self.db.get(k)
         pass
 
-    def handle_external_request(self, msg):
-        # client API requests and peer join requests
+    def handle_API_request(self, msg):
+        # client API requests
         if len(msg) < 4:
             self.logger.info("bad external request: too short")
         else:    
-            msg_type = msg[0]
             try:
-                a,b = msg[1:].split('<>')
+                a,b,c = msg.split('<>')
             except Exception as e:
                 self.logger.info("bad external request: malformed")
 
-            if msg_type == '0': # API request
-                selector,key = a[0],a[1:]
-
-                if selector == '0': # GET
-                    #first check cache
-                    self.state.db.get(key)
-                elif selector == '1': # PUT
-                    self.local_request("P,{},{}".format(key,b))
-                elif selector == '2': # DEL
-                    self.local_request("D,{},{}".format(key,"null"))
-                else: # malformed
-                    self.logger.info("bad API request")
+            if a == '0': # GET
+                #first check cache
+                self.state.db.get(b)
+            elif a == '1': # PUT
+                self.local_request("P,{},{}".format(b,c))
+            elif a == '2': # DEL
+                self.local_request("D,{},{}".format(b,"null"))
+            else: # malformed
+                self.logger.info("bad API request")
         
-            elif msg_type == '1': # Join request 
-                # TODO test wss
-                # add to local routing table.
-                self.local_request("A,{},{}".format(k,v)) # a is wss, b is key
-                # notify congregate
-                self.c.handle_join(wss,key)
-            
 
     @asyncio.coroutine
     def mainloop(self, websocket, path):
@@ -141,7 +135,7 @@ class Congregate:
             self.logger.debug("< {}".format(input_msg))
             if self.conf['use_single_port']:
                 output_msg = self.direct_msg(input_msg)
-            else:#using this port for external requests only
+            else:   #using this port for external requests only
                 output_msg = yield from self.handle_external_request(input_msg)
                 
             if output_msg:
@@ -149,11 +143,13 @@ class Congregate:
                 #self.bmsgs.append(output_msg)
                 
             else:
+                yield from websocket.send("Hello from Congregate!")
                 self.logger.error("got bad input from peer")
 
             # adapt here
 
         except Exception as e:
+            self.logger.debug(input_msg)
             self.logger.error("mainloop exception: {}".format(e))
 
 

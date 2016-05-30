@@ -8,7 +8,7 @@ class Quorum(object):
     def __init__(self, ballot_num, num_peers):
         self.N = ballot_num
         self.num_peers = num_peers
-        self.quorum = int((num_peers / 2) + (num_peers % 2))
+        self.quorum = int(num_peers / 2) #+ (num_peers % 2))
         self.acceptors = 0
         self.rejectors = 0
         self.acceptor_msgs = {} 

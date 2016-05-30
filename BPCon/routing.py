@@ -14,11 +14,12 @@ class GroupManager(object):
     manages peer pubkeys and certificates
     
     """
-    def __init__(self, initlist=[], key_dir="/"):
+    def __init__(self, conf):
+        self.conf = conf
         self.peers = {}
         self.keyspace = (0.0,1.0)
-        for wss in initlist:
-            fname = key_dir + self.get_ID(wss)+".pubkey"
+        for wss in conf['peerlist']:
+            fname = conf['peer_keys'] + self.get_ID(wss)+".pubkey"
             if os.path.exists(fname):
                 #read key and add pair to self.peers
                 with open(fname, 'r') as fh:
@@ -35,19 +36,24 @@ class GroupManager(object):
         encoded =  hashlib.sha1(sock_str.encode())
         return encoded.hexdigest()
 
-    def add_peer(self, sock_str, key):
-        #sock_str = "wss://"+str(ip)+":"+str(port)
-        ID = self.get_ID(sock_str)
-        if not sock_str in self.peers.keys():
-            key = str(key)
-            self.peers[sock_str] = RSA.importKey(key) #error check here
-            # write key to file
-            with open(keydir+ID+".pubkey", 'w') as fh:
-                fh.write(key)
-
-            self.num_peers += 1
-            return True
-
+    def add_peer(self, sock_str, creds):
+        try:
+            key,cert = creds.split('<>')
+            #sock_str = "wss://"+str(ip)+":"+str(port)
+            ID = self.get_ID(sock_str)
+            if not sock_str in self.peers.keys():
+                key = str(key)
+                self.peers[sock_str] = RSA.importKey(key) #error check here
+                print("add peer: key imported")
+                # write key to file
+                with open(self.conf['peer_keys']+ID+".pubkey", 'w') as fh:
+                    fh.write(key)
+                with open("{}{}.crt".format(self.conf['peer_certs'],ID), 'w') as fh:
+                    fh.write(cert)
+                self.num_peers += 1
+                return True
+        except Exception as e:
+            print("add peer: {}".format(e))
         return False    
 
     def remove_peer(self, wss):
