@@ -16,16 +16,29 @@ class GroupManager(object):
     """
     def __init__(self, conf):
         self.conf = conf
-        self.peers = {}
+        self.keyspace = (0.0,0.0)
+        self.peers = {} # group members
+        self.num_peers = 0
+
+    def init_local_group(self):    
         self.keyspace = (0.0,1.0)
-        for wss in conf['peerlist']:
-            fname = conf['peer_keys'] + self.get_ID(wss)+".pubkey"
-            if os.path.exists(fname):
+
+        # add self
+        with open(self.conf['keyfile'], 'r') as fh:
+            key = fh.read()
+        with open(self.conf['certfile'], 'r') as fh:
+            cert = fh.read()
+
+        self.add_peer(self.conf['p_wss'], key + "<>" + cert)
+
+        for wss in self.conf['peerlist']:
+            fname = self.conf['peer_keys'] + self.get_ID(wss)+".pubkey"
+            if os.path.isfile(fname):
                 #read key and add pair to self.peers
                 with open(fname, 'r') as fh:
                     self.peers[wss] = RSA.importKey(fh.read()) 
             else:
-                print("missing key file for {}".format(wss))
+                self.conf['logger'].info("missing key file for {}".format(wss))
         
         self.num_peers = len(self.peers)
 
@@ -43,8 +56,8 @@ class GroupManager(object):
             ID = self.get_ID(sock_str)
             if not sock_str in self.peers.keys():
                 key = str(key)
-                self.peers[sock_str] = RSA.importKey(key) #error check here
-                print("add peer: key imported")
+                self.peers[sock_str] = RSA.importKey(key) 
+                self.conf['logger'].debug("add peer: key imported")
                 # write key to file
                 with open(self.conf['peer_keys']+ID+".pubkey", 'w') as fh:
                     fh.write(key)
@@ -53,7 +66,7 @@ class GroupManager(object):
                 self.num_peers += 1
                 return True
         except Exception as e:
-            print("add peer: {}".format(e))
+            self.conf['logger'].debug(e)
         return False    
 
     def remove_peer(self, wss):
@@ -62,12 +75,14 @@ class GroupManager(object):
             self.num_peers -= 1
             return True
         else:
-            print("remove failed")
+            self.conf['logger'].debug("remove failed")
             return False
 
     def get_all(self):
         # returns list of addresses of peers in group
-        return self.peers.keys()
+        sockets = list(self.peers.keys())
+        sockets.remove(self.conf['p_wss']) # don't want to send to self
+        return sockets
 
         
     def verify_sigs(self, msglist):
@@ -85,13 +100,15 @@ class GroupManager(object):
                 if verifier.verify(h, sigmsg):
                     num_verified += 1
             else:        
-                print("missing a key for {}".format(wss))
+                self.conf['logger'].info("missing a key for {}".format(wss))
 
         return num_verified
 
-    def save(self):
-        save_state('data/bpcon_routing.pkl',(self.peers, self.keyspace))
+    def save(self,gid):
+        fname = "data/bpcon_routing_{}.pkl".format(gid)
+        tosave = [self.peers, self.keyspace]
+        save_state(fname,tosave)
     
-    def load_state(self):
-        (self.peers, self.keyspace) = load_state('data/bpcon_routing.pkl')
+    def load(self,gid):
+        (self.peers, self.keyspace) = load_state('data/bpcon_routing_{}.pkl'.format(gid))
 

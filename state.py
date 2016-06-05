@@ -10,7 +10,7 @@ class StateManager:
         self.addr = conf['c_wss']
         self.groups = {}
         self.groups['G0'] = GroupManager(conf) # (members, keyspace)
-        self.groups['G1'] = None
+        self.groups['G1'] = GroupManager(conf) # overwritten by BPCon
         self.groups['G2'] = GroupManager(conf)
         
         self.db = InMemoryStorage()
@@ -25,9 +25,7 @@ class StateManager:
         self.failed_peers = {}
         self.bad_peers = {}
 
-        self.backup = None # disc copy of db and routing state
-
-    def update(self, val, ballot_num):
+    def update(self, val, ballot_num=-1):
         self.logger.debug("updating state: ballot #{}, op: {}".format(ballot_num, val))
         if not ',' in val:
             # requires unpackaging
@@ -55,7 +53,7 @@ class StateManager:
             diff = (keyspace[1] - keyspace[0]) / 2
             mid = keyspace[0] + diff
 
-            if (self.addr == v) or (self.addr in list_a):
+            if self.addr in list_a:
                 self.groups['G2'].peers = {}
                 for wss in list_b:
                     self.groups['G2'].peers[wss] = self.groups['G1'].peers[wss]
@@ -128,14 +126,21 @@ class StateManager:
 
 
     def image_state(self):
-        # create disc copy of system state
-        backupData = [self.state.db, self.state.groups]
-        dataBytes = pickle.dumps(backupData)
-        dataInts = int.from_bytes(dataBytes, byteorder='little')
+        # create disc copy of system state 
+        try:
+            # These saved to data directory
+            self.groups['G0'].save(0)
+            self.groups['G1'].save(1)
+            self.groups['G2'].save(2)
+            self.db.save()
+        except Exception as e:
+            self.logger.debug("save state failed: {}".format(e))
 
-        newBackup = str(int(time.time())) + "_backup.pkli"
-        with open(newBackup, 'w') as fh:
-            fh.write(dataInts)
-
-        self.backup = newBackup
-
+    def load_state(self):
+        try:
+            self.groups['G0'].load(0)
+            self.groups['G1'].load(1)
+            self.groups['G2'].load(2)
+            self.db.load()
+        except Exception as e:
+            self.logger.debug("load state failed: {}".format(e))

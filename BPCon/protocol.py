@@ -39,16 +39,19 @@ class BPConProtocol:
         self.maxVVal = None     # value voted for maxVBal
         self.avs = {}           # msg dict keyed by value (max ballot saved only)
         self.seen = {}          # 1b messages -> use to check if v is safe at b
-        self.bmsgs = []         # log of messages sent by this instance       
+        self.bmsgs = []         # log of values in 2b messages sent by this instance       
         self.Q = None
         
         with open(conf['keyfile'], 'r') as fh:
             key = RSA.importKey(fh.read())
         self.signer = PKCS1_v1_5.new(key)
 
+        # initialize localgroup
         self.peers = GroupManager(conf)
+        self.peers.init_local_group()
         self.state = state
         self.state.groups['G1'] = self.peers
+
         self.ctx = get_ssl_context(conf['peer_certs'])
         self.pending = None
     
@@ -71,66 +74,75 @@ class BPConProtocol:
         #    self.logger.error("Bad Client: prior quorum being managed for ballot {}".format(self.Q.N))
         if not ',' in proposal:
             self.logger.error("db commit proposal not in key,value format")
-            return
-      
-        self.maxBal = self.maxVBal + 1
-        self.Q = Quorum(self.maxBal, self.peers.num_peers)
-        self.logger.debug("creating Quorum object with N={}, num_peers={}".format(self.maxBal, self.peers.num_peers))
-        self.pending = future
-        self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, proposal))
-        msg_1a = "1a&{}&{}".format(str(time.time()),self.maxBal)
-        recipients = self.peers.get_all()
-        yield from asyncio.async(self.send_msg(msg_1a, recipients, self.handle_msg)) # collect stats here
-        
-        res = 0
+            return {'code': 1} # invalid request failcase
 
-        if self.pending.done():
-            # Error case (possibly unneccessary)
-            self.logger.error("future done before voting complete")
+        self.pending = future
+        self.maxBal = self.maxVBal + 1
+        recipients = self.peers.get_all()
+
+        if not len(recipients): # no localgroup peers
+            self.maxVBal += 1
+            self.bmsgs.append(proposal)
+            self.state.update(proposal,self.maxBal) # necessary to avoid including self in every round
+            res = {'code': 0} # success case
+
         else:
-            if self.Q.quorum_1b():
-                if self.Q.got_majority_accept():
-                    self.logger.debug("quorum accepts")
-                    val_bytes = proposal.encode()
-                    length = len(val_bytes)
-                    prepped_val = str(length)+"<>"+str(int.from_bytes(val_bytes, byteorder='little'))
-                    yield from self.send_msg(self.phase1c(prepped_val), recipients, self.handle_msg) # send 1c
-                    self.maxVBal = self.Q.N
-                    self.maxVVal = proposal
-                    if self.Q.quorum_2b():
-                        # Quorum Accepts and Commit succeeds case
-                        self.logger.info("2b success")
-                        #self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
-                        try:
-                            self.state.update(proposal, self.Q.N)
-                            res = 1 # succeeded
-                        except Exception as e:
-                            self.logger.info("update failed!")
-                    else:
-                        # Quorum Accepts then Commit fails case
-                        self.logger.info("2b failure: quorum1 accepts but quorum2 failed")
-                else:
-                    # Quorum Rejects case
-                    self.logger.info("failure: quorum1 rejects {} for ballot {}".format(proposal, self.Q.N))
+            self.Q = Quorum(self.maxBal, self.peers.num_peers)
+            self.logger.debug("creating Quorum object with N={}, num_peers={}".format(self.maxBal, self.peers.num_peers))
+            self.logger.debug("sending 1a -> {}: {}".format(self.maxBal, proposal))
+            msg_1a = "1a&{}&{}".format(str(time.time()),self.maxBal)
+            yield from asyncio.async(self.send_msg(msg_1a, recipients, self.handle_msg)) # collect stats here
+        
+            if self.pending.done():
+                # Error case (possibly unneccessary)
+                self.logger.error("future done before voting complete")
             else:
-                self.logger.info("failure: quorum1 not acquired")
+                if self.Q.quorum_1b():
+                    if self.Q.got_majority_accept():
+                        self.logger.info("1: quorum of {} accepts".format(self.Q.quorum))
+                        val_bytes = proposal.encode()
+                        length = len(val_bytes)
+                        prepped_val = str(length)+"<>"+str(int.from_bytes(val_bytes, byteorder='little'))
+                        yield from self.send_msg(self.phase1c(prepped_val), recipients, self.handle_msg) # send 1c
+                        self.maxVBal = self.Q.N
+                        self.maxVVal = proposal
+                        if self.Q.quorum_2b():
+                            # Quorum Accepts and Commit succeeds case
+                            self.logger.info("2: quorum accepts")
+                            #self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
+                            try:
+                                self.state.update(proposal, self.Q.N)
+                                res = {'code': 0} # succeeded
+                            except Exception as e:
+                                self.logger.info("update failed!")
+                                res = {'code': 1}
+                        else:
+                            # Quorum Accepts then Commit fails case
+                            self.logger.info("2b failure: quorum1 accepts but quorum2 failed")
+                    else:
+                        # Quorum Rejects case -> reconfigure!
+                        self.logger.info("failure: quorum1 rejects {} for ballot {}".format(proposal, self.Q.N))
+                        good_peer = self.Q.rejecting_quorum_member()
+                        res = {'code': 2, 'value': good_peer} # corrupt state failcase, wss of an up-to-date peer
+                else:
+                    self.logger.info("failure: quorum1 not acquired")
 
         if not self.pending.done():
             self.pending.set_result(res)
-        return res # failed
+        return res 
         
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
         
         if (int(N) > int(self.maxBal)): #maxbal type undefined behavior sometimes 
             self.maxBal = N
-            msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
-            msg_hash = SHA.new(msg_1b.encode())
-            sig = self.signer.sign(msg_hash)
+        msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
+        msg_hash = SHA.new(msg_1b.encode())
+        sig = self.signer.sign(msg_hash)
         
-            tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
-            self.logger.debug("sending 1b -> {}".format(tosend))
-            return tosend
+        tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
+        self.logger.debug("sending 1b -> {}".format(tosend))
+        return tosend
             
     def phase1c(self, val):
         # bmsgs := bmsgs U ("1c", bal, val)
@@ -155,6 +167,9 @@ class BPConProtocol:
             self.maxBal = b
             self.maxVBal = b
 
+            self.bmsgs.append(m.val) # saving state update values for bringing peers up-to-date
+
+            self.logger.info(self.bmsgs)
             self.state.update(v, b)
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
@@ -267,8 +282,8 @@ class BPConProtocol:
                 except Exception as e:
                     self.logger.debug("no socket to close")
 
-        if not handler_function:
-            return input_msg
         self.logger.info("Peers: {}/{}".format(good_peers, len(recipient_list)))     
         self.logger.info("Peer Latencies: {}".format(peer_latencies))
-         
+        
+        if not handler_function: # TODO what is this for?
+            return input_msg

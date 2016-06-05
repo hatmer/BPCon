@@ -156,6 +156,7 @@ class CongregateProtocol:
         # add to local routing table
         request = "A,{},{}<>{}".format(wss,pubkey,cert)
         added = yield from self.bpcon_request(request)
+        self.logger.debug(added)
         # notifiy neighbors of membership change
         
 
@@ -204,7 +205,7 @@ class CongregateProtocol:
             diff = (keyspace[1] - keyspace[0]) / 2
             mid = keyspace[0] + diff
 
-            opList.append("S,G1,{}".format(self.conf['c_wss']))
+            opList.append("S,G1,{}".format(self.conf['c_wss'])) #TODO check if sending wss does anything useful
 
             #for node in list_b:
             #    opList.append("M;G1;{};G1".format(node))

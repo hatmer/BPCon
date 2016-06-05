@@ -1,4 +1,5 @@
 import pickle
+from BPCon.utils import save_state, load_state
 
 class InMemoryStorage(object):
     def __init__(self):
@@ -11,7 +12,7 @@ class InMemoryStorage(object):
         return self.kvstore.pop(k,None)
     
     def save(self): # need metadata here
-        save_state('data/bpcon_storage.txt', self.kvstore)
+        save_state('data/db_copy.pkl', self.kvstore)
     
     def load(self):
-        self.kvstore = load_state('data/bpcon_storage.txt')
+        self.kvstore = load_state('data/db_copy.pkl')

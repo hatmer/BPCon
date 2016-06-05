@@ -1,4 +1,4 @@
-
+import random
 
 class Quorum(object):
     """
@@ -11,17 +11,26 @@ class Quorum(object):
         self.quorum = int(num_peers / 2) #+ (num_peers % 2))
         self.acceptors = 0
         self.rejectors = 0
-        self.acceptor_msgs = {} 
+        self.peer_msgs = {} 
         self.commits = 0
+        self.current_ballots = {} # list of seen maxBallots from peers
 
     def add_1b(self, mb, msg, peer_wss):
-        if peer_wss not in self.acceptor_msgs.keys():
+        if peer_wss not in self.peer_msgs.keys():
+            self.peer_msgs[peer_wss] = msg
             if mb < self.N:
                 self.acceptors += 1
-                self.acceptor_msgs[peer_wss] = msg
             else:
                 self.rejectors += 1
-                self.acceptor_msgs[peer_wss] = None # 1b nack
+                # keep track of maxBallots seen
+                if mb in self.current_ballots:
+                    self.current_ballots[mb] += 1
+                else:
+                    self.current_ballots[mb] = 1
+                
+    def rejecting_quorum_member(self):
+        if max(self.current_ballots.values()) >= self.quorum:
+            return random.choice(self.peer_msgs.keys()) # random wss from quorum that has seen a higher ballot
 
     def add_2b(self, N):
         if N == self.N:
@@ -39,5 +48,5 @@ class Quorum(object):
         return self.acceptors >= self.rejectors
     
     def get_msgs(self):
-        return ",".join(k+";"+v for (k,v) in self.acceptor_msgs.items())
+        return ",".join(k+";"+v for (k,v) in self.peer_msgs.items())
 

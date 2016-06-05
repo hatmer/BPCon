@@ -1,13 +1,20 @@
+
+### TODO ###
+
 maxballot increases even for failed 1a send
 verify 2b successfully sent before updating mBal and mVal
-no_network sleep timer
-live connections management
-log/db
 custom error handling in send_msg
 verify runtime environment
 2b verify val
 timestamps for group ops
-logging streams
+logging -> make consistent
 configManager check os
 corrupt state -> cannot verify so requests bmsgs next round if still in same epoch
 dynamic config: bmsg requests, add_peer requests just get this (epochs(state image hashes)) - startup script requests current image from web portal
+load balancer: makes cloned state available, dns, registers wss and latency of joining peer, outward-facing api access
+ -> calculates system maximum capacity, counts api requests, randomizes which node gets to handle request or uses cache
+remove peer list stuff from config
+algorithms
+single-port fxn
+clean up 
+web api / demo
