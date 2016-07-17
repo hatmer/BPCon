@@ -21,7 +21,7 @@ class CongregateProtocol:
     def __init__(self, loop, conf, bpcon):
         self.conf = conf
         self.loop = loop
-        self.logger = conf['logger']
+        self.log = conf['log']
         self.address = conf['c_wss']
         self.bpcon = bpcon
 
@@ -32,30 +32,30 @@ class CongregateProtocol:
         if future.done():
             #do cleanup
             if not future.cancelled():
-                logger.info("commit result: {}".format(future.result()))
+                self.log.info("commit result: {}".format(future.result()))
             else:
-                logger.info("future cancelled")
+                self.log.info("future cancelled")
         else:    
-            logger.info("future not done ???")
+            self.log.info("future not done ???")
 
 
     @asyncio.coroutine
     def bpcon_request(self, msg):
-        self.logger.debug("making request: {}".format(msg)) 
+        self.log.debug("making request: {}".format(msg)) 
         bpcon_task = asyncio.Future()
         bpcon_task.add_done_callback(self.got_commit_result)
         try:
             timer_result = asyncio.wait_for(bpcon_task, 3.0) # timer possibly unneccessary
             commit_result = yield from self.bpcon.request(msg, bpcon_task) # returns boolean
-            self.logger.info("bpcon request result: {}".format(commit_result))
+            self.log.info("bpcon request result: {}".format(commit_result))
             return commit_result
 
         except asyncio.TimeoutError:
-            self.logger.info("bpcon commit timed out")
+            self.log.info("bpcon commit timed out")
         except asyncio.CancelledError:
-            self.logger.info("bpcon commit future cancelled")
+            self.log.info("bpcon commit future cancelled")
         except Exception as e:
-            self.logger.debug(e)
+            self.log.debug(e)
 
     @asyncio.coroutine
     def handle_2pc_request(self, request):
@@ -65,21 +65,21 @@ class CongregateProtocol:
         phase = request[:2]
         op = request[3:]
         if phase == "P1":  # is P1 (got requesthash)
-            self.logger.info("remote P1 requesthash is {}".format(op))
+            self.log.info("remote P1 requesthash is {}".format(op))
             local_p1_msg = "G,{},{}".format("lock", op)
             lock_acquired = yield from self.bpcon_request(local_p1_msg) # acquire group lock
             response = "P1,ACK"
         elif phase == "P2": # is P2 
             # assess suitability (phase vs. state)
-            self.logger.info("remote P2 request to be committed is {}".format(op))
+            self.log.info("remote P2 request to be committed is {}".format(op))
             # TODO check input lots (is a proper request, hashes to locked value, is a suitable group op)
             p2_success = yield from self.bpcon_request(op)
             response = "P2,ACK"
         else:
-            self.logger.error("peer sent bad 2pc request")
+            self.log.error("peer sent bad 2pc request")
 
         if lock_acquired:                
-            self.logger.debug("returning {}".format(response))
+            self.log.debug("returning {}".format(response))
             return response
             
             
@@ -101,53 +101,53 @@ class CongregateProtocol:
         requesthash = SHA.new(request.encode()).hexdigest()
         local_p1_msg = "G,{},{}".format("lock", requesthash)
         lock_acquired = yield from self.bpcon_request(local_p1_msg) # request lock from local group
-        self.logger.debug("bpcon lock acquired: {}".format(lock_acquired))
+        self.log.debug("bpcon lock acquired: {}".format(lock_acquired))
         
         if lock_acquired: 
             if len(recipients) == 0:
                 # doing a local group operation
                 request_success = yield from self.bpcon_request(request)
                 if request_success:
-                    self.logger.info("local group operation complete")
+                    self.log.info("local group operation complete")
             else:
                 # make 2pc P1 request to remote group
                 remote_p1_msg = "P1,{}".format(requesthash)
-                self.logger.info("sending {}".format(remote_p1_msg))
+                self.log.info("sending {}".format(remote_p1_msg))
                 p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipients)
-                self.logger.info("P1 response: {}".format(p1_response)) 
+                self.log.info("P1 response: {}".format(p1_response)) 
             
                 if p1_response == "P1,ACK":  
 	                # commit operation locally
                     p2_success = yield from self.bpcon_request(request) # local_p2_msg
                 
                     if p2_success: 
-                        self.logger.info("P2 local commit succeeded. sending P2 request")
+                        self.log.info("P2 local commit succeeded. sending P2 request")
                         remote_p2_msg = "P2,{}".format(request)
                         p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipients)
                         if p2_response == "P2,ACK":
-                            self.logger.info("Congregate 2pc request completed successfully")
+                            self.log.info("Congregate 2pc request completed successfully")
             
 
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         try:
             input_msg = yield from websocket.recv()
-            self.logger.info("< {}".format(input_msg))
+            self.log.info("< {}".format(input_msg))
             output_msg = yield from self.handle_2pc_request(input_msg)
             
             if output_msg:
-                self.logger.info("> {}".format(output_msg))
+                self.log.info("> {}".format(output_msg))
                 yield from websocket.send(output_msg) # ACKs for P1 and P2
                 #self.bmsgs.append(output_msg)
                 
             else:
-                self.logger.error("no consensus on input from peer")
+                self.log.error("no consensus on input from peer")
 
             # adapt here
             # get_reconfig()
 
         except Exception as e:
-            self.logger.error("mainloop exception: {}".format(e))
+            self.log.error("mainloop exception: {}".format(e))
 
     @asyncio.coroutine
     def handle_join(self, wss, pubkey, cert):
@@ -156,7 +156,7 @@ class CongregateProtocol:
         # add to local routing table
         request = "A,{},{}<>{}".format(wss,pubkey,cert)
         added = yield from self.bpcon_request(request)
-        self.logger.debug(added)
+        self.log.debug(added)
         # notifiy neighbors of membership change
         
 
@@ -194,7 +194,7 @@ class CongregateProtocol:
             # action: divide group and keyspace in half
             # Initiator node goes in first group
             # 1. get new groups and keyspaces
-            self.logger.debug("constructing split request")
+            self.log.debug("constructing split request")
             peers = sorted(self.bpcon.state.groups['G1'].peers)
             l = int(len(peers)/2)
             list_a = peers[:l]

@@ -6,7 +6,7 @@ import time
 
 class StateManager:
     def __init__(self, conf): # init_state=None):
-        self.logger = conf['logger']
+        self.log = conf['log']
         self.addr = conf['c_wss']
         self.groups = {}
         self.groups['G0'] = GroupManager(conf) # (members, keyspace)
@@ -26,7 +26,7 @@ class StateManager:
         self.bad_peers = {}
 
     def update(self, val, ballot_num=-1):
-        self.logger.debug("updating state: ballot #{}, op: {}".format(ballot_num, val))
+        self.log.debug("updating state: ballot #{}, op: {}".format(ballot_num, val))
         if not ',' in val:
             # requires unpackaging
             length, data = val.split('<>')
@@ -44,8 +44,8 @@ class StateManager:
             self.groups['G1'].add_peer(k,v)
         #Group membership requests
         elif t == "S": # Split: v is initiator wss
-            self.logger.debug("splitting")
-            peers = sorted(self.groups['G1'].peers) #sorted array of the wss keys
+            self.log.debug("splitting")
+            peers = self.groups['G1'].peers.keys() # array of wss
             l = int(len(peers)/2)
             list_a = peers[:l]
             list_b = peers[l:] # these nodes will be in the new group
@@ -54,7 +54,7 @@ class StateManager:
             mid = keyspace[0] + diff
 
             if self.addr in list_a:
-                self.groups['G2'].peers = {}
+                self.groups['G2'].peers = OrderedDict()
                 for wss in list_b:
                     self.groups['G2'].peers[wss] = self.groups['G1'].peers[wss]
                     del self.groups['G1'].peers[wss]
@@ -63,7 +63,7 @@ class StateManager:
                 self.groups['G2'].keyspace = (mid,keyspace[1])
 
             elif self.addr in list_b:
-                self.groups['G0'].peers = {}
+                self.groups['G0'].peers = OrderedDict()
                 for wss in list_a:
                     self.groups['G0'].peers[wss] = self.groups['G1'].peers[wss]
                     del self.groups['G1'].peers[wss]
@@ -72,36 +72,36 @@ class StateManager:
                 self.groups['G1'].keyspace = (mid,keyspace[1])
             
             else:
-                self.logger.error("inconsistent state. not participating in split operation!")
+                self.log.error("inconsistent state. not participating in split operation!")
         
 
         # congregate requests
         elif t == 'G': 
             if k == 'lock': #op is lock request
-                self.logger.debug("attempting to acquire lock")
+                self.log.debug("attempting to acquire lock")
                 elapsed = time.time() - self.timer
                 if self.state == 'normal' or (self.state == 'locked' and elapsed > 3):
                     self.group_p1_hashval = v
                     self.state = 'locked'
                     self.timer = time.time()
-                    self.logger.debug("lock acquired. Locked hashvalue: {}".format(v))
+                    self.log.debug("lock acquired. Locked hashvalue: {}".format(v))
 
             elif k == "commit" and self.state == 'locked': #op is prepped(locked) group op
                     # verify group op
                     vhash = SHA.new(val.encode()).hexdigest()
                     if vhash != self.group_p1_hashval:
-                        self.logger.info("locked state, rejecting invalid commit value")
+                        self.log.info("locked state, rejecting invalid commit value")
                         return
                     self.group_update(v)
                     # release lock
                     self.state = 'normal'
-                    self.logger.debug("lock released")
+                    self.log.debug("lock released")
             else:
-                self.logger.info("got bad group request: ignoring")
+                self.log.info("got bad group request: ignoring")
     
     def group_update(self, opList):
         # TODO modify for rollbackable
-        self.logger.info("performing group operations: {}".format(opList))
+        self.log.info("performing group operations: {}".format(opList))
         try:
             for item in opList.split('<>'): #  keyspace and group membership
                 t,g,a,b = item.split(';') # t is type, g is Group#
@@ -119,10 +119,10 @@ class StateManager:
                     self.groups[g].remove_peer(a)
                 
                 else:
-                    self.logger.info("unrecognized group op: {}".format(item))
+                    self.log.info("unrecognized group op: {}".format(item))
 
         except Exception as e:
-            self.logger.info("got bad value in group update: {}".format(e))
+            self.log.info("got bad value in group update: {}".format(e))
 
 
     def image_state(self):
@@ -134,7 +134,7 @@ class StateManager:
             self.groups['G2'].save(2)
             self.db.save()
         except Exception as e:
-            self.logger.debug("save state failed: {}".format(e))
+            self.log.debug("save state failed: {}".format(e))
 
     def load_state(self):
         try:
@@ -143,4 +143,4 @@ class StateManager:
             self.groups['G2'].load(2)
             self.db.load()
         except Exception as e:
-            self.logger.debug("load state failed: {}".format(e))
+            self.log.debug("load state failed: {}".format(e))

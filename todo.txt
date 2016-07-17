@@ -18,3 +18,5 @@ algorithms
 single-port fxn
 clean up 
 web api / demo
+split op: db sort and partition / optimize
+fix orderedDict

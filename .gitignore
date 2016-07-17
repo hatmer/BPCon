@@ -8,6 +8,7 @@ BPCon/*.swp
 *.egg-info
 *.pkl
 *.tar.gz
+*.txt
 
 ### Specific Files ###
 push.sh

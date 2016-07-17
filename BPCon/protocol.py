@@ -1,6 +1,5 @@
 import asyncio
 import websockets
-import logging
 import time
 
 from Crypto.Signature import PKCS1_v1_5
@@ -33,7 +32,7 @@ class BPConProtocol:
         conf  -- dictionary with configuration variables
         state -- class object with update() function
         """
-        self.logger = conf['logger']
+        self.logger = conf['log']
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
         self.maxVVal = None     # value voted for maxVBal

@@ -4,6 +4,7 @@ from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 from BPCon.utils import save_state, load_state
+from collections import OrderedDict
 
 class GroupManager(object):
     """
@@ -17,7 +18,7 @@ class GroupManager(object):
     def __init__(self, conf):
         self.conf = conf
         self.keyspace = (0.0,0.0)
-        self.peers = {} # group members
+        self.peers = OrderedDict() # group members
         self.num_peers = 0
 
     def init_local_group(self):    
@@ -38,7 +39,7 @@ class GroupManager(object):
                 with open(fname, 'r') as fh:
                     self.peers[wss] = RSA.importKey(fh.read()) 
             else:
-                self.conf['logger'].info("missing key file for {}".format(wss))
+                self.conf['log'].info("missing key file for {}".format(wss))
         
         self.num_peers = len(self.peers)
 
@@ -57,7 +58,7 @@ class GroupManager(object):
             if not sock_str in self.peers.keys():
                 key = str(key)
                 self.peers[sock_str] = RSA.importKey(key) 
-                self.conf['logger'].debug("add peer: key imported")
+                self.conf['log'].debug("add peer: key imported")
                 # write key to file
                 with open(self.conf['peer_keys']+ID+".pubkey", 'w') as fh:
                     fh.write(key)
@@ -66,7 +67,7 @@ class GroupManager(object):
                 self.num_peers += 1
                 return True
         except Exception as e:
-            self.conf['logger'].debug(e)
+            self.conf['log'].debug(e)
         return False    
 
     def remove_peer(self, wss):
@@ -75,7 +76,7 @@ class GroupManager(object):
             self.num_peers -= 1
             return True
         else:
-            self.conf['logger'].debug("remove failed")
+            self.conf['log'].debug("remove failed")
             return False
 
     def get_all(self):
@@ -100,7 +101,7 @@ class GroupManager(object):
                 if verifier.verify(h, sigmsg):
                     num_verified += 1
             else:        
-                self.conf['logger'].info("missing a key for {}".format(wss))
+                self.conf['log'].info("missing a key for {}".format(wss))
 
         return num_verified
 

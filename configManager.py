@@ -8,7 +8,6 @@ import ssl
 import logging
 from logging.config import fileConfig
 import os.path
-#import subprocess
 from Crypto.PublicKey import RSA
 from BPCon.utils import shell
 
@@ -17,31 +16,29 @@ from BPCon.utils import shell
 #logging.basicConfig(format=FORMAT)
 
 fileConfig('logging_config.ini')
-logger = logging.getLogger()
+log = logging.getLogger()
 #############################
 
 class ConfigManager:
 
-    def setup_logging(self):
-        pass
-
     def load_config(self, configFile):
-    
+        log = logging.getLogger() 
         self.config = configparser.ConfigParser()
         self.config.read(configFile)
 
         conf = {}
+        conf['log'] = log
         conf['ip_addr'] = self.config['network']['ip_addr']
         conf['port'] = int(self.config['network']['port'])
         conf['p_wss'] = "wss://"+conf['ip_addr'] +":"+ str(conf['port'])
         conf['c_wss'] = "wss://"+conf['ip_addr'] +":"+ str(conf['port']+1)
         
-#        print("adding peers from config")
+#        log.info("adding peers from config")
 #        conf['peerlist'] = []
 #        for key,val in self.config.items('peers'):
 #            wss = "wss://"+key+":"+val
 #            conf['peerlist'].append(wss) 
-#        print("peers added")
+#        log.info("peers added")
         conf['peerlist'] = [] # empty for clean start
 
         conf['peer_certs'] = self.config['creds']['peer_certs']
@@ -50,8 +47,7 @@ class ConfigManager:
         conf['peer_keys'] = self.config['creds']['peer_keys']
 
         # Logging
-        conf['logger'] = logger
-        print("verifying credentials")
+        log.info("verifying credentials")
         # verify credential file tree
         if not os.path.exists('creds'):
             shell("mkdir creds")
@@ -61,13 +57,13 @@ class ConfigManager:
         if not os.path.exists('creds/local'):
             shell("mkdir creds/local")
         if not os.path.isfile('creds/local/server.key'):
-            print("Generating private key")
+            log.info("Generating private key")
             shell("openssl genrsa -passout pass:x -out server.pass.key 2048")
             shell("openssl rsa -passin pass:x -in server.pass.key -out creds/local/server.key")
             shell("rm server.pass.key")
             shell("openssl rsa -in creds/local/server.key -pubout > creds/local/server.pub")
         if not os.path.isfile('creds/local/server.crt'):
-            print("Signing certificate")
+            log.info("Signing certificate")
             shell("openssl req -new -subj '/C=SE/ST=XX/L=XX/O=XX/CN=localhost' -key creds/local/server.key -out creds/local/server.csr")
             shell("openssl x509 -req -days 365 -in creds/local/server.csr -signkey creds/local/server.key -out creds/local/server.crt")
             
