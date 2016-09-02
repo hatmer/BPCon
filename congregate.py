@@ -26,43 +26,51 @@ else:
 
 class Congregate:
     def __init__(self):
+        """ Initialize system state and components """
         try:
-            self.startup() #add option for clean start
+            # Load state
+            self.startup() # TODO make an init without cloned state an option
+            # Create main event loop
             self.loop = asyncio.get_event_loop()
+            # Create BPCon instance
             self.bpcon = BPConProtocol(self.conf, self.state)
             self.paxos_server = websockets.serve(self.bpcon.main_loop, self.conf['ip_addr'], self.conf['port'], ssl=self.conf['ssl'])
             self.loop.run_until_complete(self.paxos_server)
             log.info("Started BPCon on port {}".format(self.conf['port']))
 
+            # Create Congregate instance
             self.c = CongregateProtocol(self.loop, self.conf, self.bpcon)       
             self.congregate_server = websockets.serve(self.c.main_loop, self.conf['ip_addr'], self.conf['port']+1, ssl=self.conf['ssl'])
             self.loop.run_until_complete(self.congregate_server)
             log.info("Started Congregate on port {}".format(self.conf['port']+1))
 
+            # Create API server
             self.web_server = websockets.serve(self.mainloop, self.conf['ip_addr'], self.conf['port']+2) 
             self.loop.run_until_complete(self.web_server)
             log.info("Started Web Server on port {}".format(self.conf['port']+2))
 
+            # Add self to local group
             self.join_request()
 
+            # Testing 
             if self.conf['is_client']:
                 #self.c.reconfig()
                 log.debug("is client. making test requests")
                 for x in range(1):
                     request = "P,{},hello{}".format(x,x)
                     self.local_request("P,test,value")
-                    #log.debug("request is {}".format(request))
                     self.local_request("P,test1,value1")
                     self.local_request("P,test2,value2")
                     self.local_request("P,test,value3")
                     self.local_request("D,test2,")
                     self.local_request(request)
-                    pass
 
                 log.debug("requests complete")     
 
         except Exception as e:
             log.info(e)
+
+    ### State operations ###
 
     def startup(self):
         """
@@ -105,6 +113,8 @@ class Congregate:
         except Exception as e:
             log.info("clone of state failed")
 
+    ### Requests ###
+
     def local_request(self, msg):
         log.info("replicating {}".format(msg))
         self.loop.run_until_complete(self.c.bpcon_request(msg))
@@ -114,6 +124,7 @@ class Congregate:
         self.loop.run_until_complete(self.c.make_2pc_request(msg))
 
     def join_request(self):
+        """ Command Congregate instance to join its peers by supplying credentials """
         log.debug("attempting to join")
         try:
             with open("creds/local/server.crt", 'r') as fh:

@@ -16,7 +16,7 @@ class StateManager:
         self.db = InMemoryStorage()
 
         self.group_p1_hashval = None 
-        self.state = 'normal'     # normal, managing1, managing2, awaiting
+        self.lock = 'normal'     # normal, locked,  managing1, managing2, awaiting
         self.timer = 0.0
         
         # local stats
@@ -80,9 +80,9 @@ class StateManager:
             if k == 'lock': #op is lock request
                 self.log.debug("attempting to acquire lock")
                 elapsed = time.time() - self.timer
-                if self.state == 'normal' or (self.state == 'locked' and elapsed > 3):
+                if self.lock == 'normal' or (self.lock == 'locked' and elapsed > 3):
                     self.group_p1_hashval = v
-                    self.state = 'locked'
+                    self.lock = 'locked'
                     self.timer = time.time()
                     self.log.debug("lock acquired. Locked hashvalue: {}".format(v))
 
@@ -94,7 +94,7 @@ class StateManager:
                         return
                     self.group_update(v)
                     # release lock
-                    self.state = 'normal'
+                    self.lock = 'normal'
                     self.log.debug("lock released")
             else:
                 self.log.info("got bad group request: ignoring")

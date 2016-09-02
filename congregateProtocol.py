@@ -24,11 +24,13 @@ class CongregateProtocol:
         self.log = conf['log']
         self.address = conf['c_wss']
         self.bpcon = bpcon
-
         self.keyspace = (0,1)
-        
+
+
+    ### Interface with BPCon in-memory database ###
 
     def got_commit_result(self, future):
+        """ Callback for BPCon commit """
         if future.done():
             #do cleanup
             if not future.cancelled():
@@ -41,6 +43,7 @@ class CongregateProtocol:
 
     @asyncio.coroutine
     def bpcon_request(self, msg):
+        """ Commit update to BPCon in-memory database """
         self.log.debug("making request: {}".format(msg)) 
         bpcon_task = asyncio.Future()
         bpcon_task.add_done_callback(self.got_commit_result)
@@ -57,10 +60,12 @@ class CongregateProtocol:
         except Exception as e:
             self.log.debug(e)
 
+    ### Interface with other groups ###
+
     @asyncio.coroutine
     def handle_2pc_request(self, request):
         """
-        Another group requests 2pc
+        Process 2pc request initiated by another group
         """
         phase = request[:2]
         op = request[3:]
@@ -91,12 +96,11 @@ class CongregateProtocol:
     @asyncio.coroutine
     def make_2pc_request(self, request, recipients=[]):
         """
-        Multigroup update/request
-        Notify neighbors of update 
+        Initiate multigroup update/request and notify neighbors of update
         """
         # 1. acquire lock internal consensus 
         # TODO first check lock state
-        if self.bpcon.state.state == "locked":
+        if self.bpcon.state.lock == "locked":
             return "failure: another group operation in progress"
         requesthash = SHA.new(request.encode()).hexdigest()
         local_p1_msg = "G,{},{}".format("lock", requesthash)
@@ -128,6 +132,8 @@ class CongregateProtocol:
                             self.log.info("Congregate 2pc request completed successfully")
             
 
+    ### Internal regulatory functions ###
+
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         try:
@@ -151,14 +157,17 @@ class CongregateProtocol:
 
     @asyncio.coroutine
     def handle_join(self, wss, pubkey, cert):
-        # ungrouped peer sent a join request
-        # test peer
-        # add to local routing table
+        """ perform join request from ungrouped peer """
+        # TODO test peer creds
+        # add to local-group routing table
         request = "A,{},{}<>{}".format(wss,pubkey,cert)
         added = yield from self.bpcon_request(request)
-        self.log.debug(added)
-        # notifiy neighbors of membership change
+        self.log.debug("join request succeeded: {}".format(added))
+        # TODO notify neighbor groups of membership change
         
+
+
+
 
     def keyspace_update(self, update):
         pass
