@@ -1,5 +1,12 @@
 #!/bin/bash
 
-xterm -hold -e 'python congregate.py 3_config.ini' &
-xterm -hold -e 'python congregate.py 2_config.ini' &
-#xterm -hold -e 'python congregate.py 1_config.ini' &
+killall xterm
+cd ..
+rm -rf demoCopy/
+cp -r Congregate/ demoCopy/
+
+cd demoCopy
+xterm -hold -e 'python run.py demo_config.ini' &
+sleep 1
+cd ../Congregate
+xterm -hold -e 'python run.py' &

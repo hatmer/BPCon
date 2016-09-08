@@ -12,7 +12,7 @@ class InMemoryStorage(object):
         return self.kvstore.pop(k,None)
     
     def save(self): # need metadata here
-        save_state('data/db_copy.pkl', self.kvstore)
+        save_state('data/backup/db_copy.pkl', self.kvstore)
     
     def load(self):
-        self.kvstore = load_state('data/db_copy.pkl')
+        self.kvstore = load_state('data/backup/db_copy.pkl')

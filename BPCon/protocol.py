@@ -1,13 +1,14 @@
 import asyncio
 import websockets
 import time
+import pickle
 
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 
 from BPCon.quorum import Quorum
-from BPCon.utils import get_ssl_context
+from BPCon.utils import get_ssl_context, encode_as_ints, decode_to_bytes
 from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
 
@@ -36,7 +37,7 @@ class BPConProtocol:
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
         self.maxVVal = None     # value voted for maxVBal
-        self.avs = {}           # msg dict keyed by value (max ballot saved only)
+        self.avs = []           # msg dict keyed by value
         self.seen = {}          # 1b messages -> use to check if v is safe at b
         self.bmsgs = []         # log of values in 2b messages sent by this instance       
         self.Q = None
@@ -65,25 +66,34 @@ class BPConProtocol:
         """
         makes phase 1a proposal
         manages successful ballots
-         state updates
-        returns succeed/fail boolean
+        performs state updates
+        returns succeed/fail code
+            0: request succeeded
+            1: request failed
+            2: request failed + resynced state
         """
+        print(self.maxBal)
         # bmsgs := bmsgs U ("1a", bal)
         #if self.Q:
         #    self.logger.error("Bad Client: prior quorum being managed for ballot {}".format(self.Q.N))
+        self.logger.debug("request initiated: {}".format(proposal))
+        res = {'code': 1}
         if not ',' in proposal:
             self.logger.error("db commit proposal not in key,value format")
-            return {'code': 1} # invalid request failcase
+            return res # invalid request failcase
 
         self.pending = future
         self.maxBal = self.maxVBal + 1
         recipients = self.peers.get_all()
+        self.logger.debug("local group is {}".format(recipients))
 
         if not len(recipients): # no localgroup peers
             self.maxVBal += 1
             self.bmsgs.append(proposal)
-            self.state.update(proposal,self.maxBal) # necessary to avoid including self in every round
+            self.state.update(self.maxBal, proposal) # necessary to avoid including self in every round
+            self.avs.append((self.maxBal, proposal))
             res = {'code': 0} # success case
+            
 
         else:
             self.Q = Quorum(self.maxBal, self.peers.num_peers)
@@ -110,24 +120,30 @@ class BPConProtocol:
                             self.logger.info("2: quorum accepts")
                             #self.logger.info("Quorum Accepted Value {} at Ballot {}".format(proposal,self.Q.N))
                             try:
-                                self.state.update(proposal, self.Q.N)
+                                self.state.update(self.Q.N, proposal)
                                 res = {'code': 0} # succeeded
+                                self.avs.append((self.Q.N, proposal))
                             except Exception as e:
                                 self.logger.info("update failed!")
-                                res = {'code': 1}
                         else:
                             # Quorum Accepts then Commit fails case
                             self.logger.info("2b failure: quorum1 accepts but quorum2 failed")
                     else:
                         # Quorum Rejects case -> reconfigure!
                         self.logger.info("failure: quorum1 rejects {} for ballot {}".format(proposal, self.Q.N))
-                        good_peer = self.Q.rejecting_quorum_member()
-                        res = {'code': 2, 'value': good_peer} # corrupt state failcase, wss of an up-to-date peer
+                        # update avs structure here for newest ballot number for value
+                        catchup_avs = self.Q.rejecting_quorum_avs() # list of (ballot#, database_operation) tuples
+                        self.logger.info("syncing state...")
+                        for ballot, op in catchup_avs:
+                            self.state.update(ballot, op)
+                            
+                        res = {'code': 2} # corrupt state failcase, host system should redo request
                 else:
                     self.logger.info("failure: quorum1 not acquired")
 
         if not self.pending.done():
             self.pending.set_result(res)
+        self.logger.debug("bpcon request finished")    
         return res 
         
     def phase1b(self, N):
@@ -135,11 +151,19 @@ class BPConProtocol:
         
         if (int(N) > int(self.maxBal)): #maxbal type undefined behavior sometimes 
             self.maxBal = N
-        msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,self.avs)
+            avs = {}
+        else:
+            n = 256
+            a = pickle.dumps(self.avs) # bytes instead of list
+            chunks = [a[i:i + n] for i in range(0, len(a), n)] # split into smaller bytestrings
+            avs = ','.join(map(encode_as_ints, chunks)) 
+        
+        msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,avs)
         msg_hash = SHA.new(msg_1b.encode())
         sig = self.signer.sign(msg_hash)
         
-        tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
+        #tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
+        tosend = msg_1b + ";" + encode_as_ints(sig)
         self.logger.debug("sending 1b -> {}".format(tosend))
         return tosend
             
@@ -165,11 +189,11 @@ class BPConProtocol:
             self.maxVVal = v
             self.maxBal = b
             self.maxVBal = b
+            self.avs.append((b,v))
+            #self.bmsgs.append(m.val) # saving state update values for bringing peers up-to-date
 
-            self.bmsgs.append(m.val) # saving state update values for bringing peers up-to-date
-
-            self.logger.info(self.bmsgs)
-            self.state.update(v, b)
+            #self.logger.info(self.bmsgs)
+            self.state.update(b, v)
             tosend = "2b&{}&{}&{}".format(str(time.time()), b, v)
             return tosend
 
@@ -183,7 +207,8 @@ class BPConProtocol:
         try:
             input_msg = yield from websocket.recv()
             self.logger.debug("< {}".format(input_msg))
-            output_msg = self.handle_msg(input_msg)
+            host,port = websocket.remote_address
+            output_msg = self.handle_msg(input_msg, "wss://{}:{}".format(host,port))
             if output_msg:
                 yield from websocket.send(output_msg)
                 self.bmsgs.append(output_msg)
@@ -216,11 +241,17 @@ class BPConProtocol:
         elif msg_type == "1b" and num_parts == 6:
             # implies is leader for ballot, has quorum object
             self.logger.debug("got 1b!!!")
-            [mb,mv,avs] = parts[3:6]
-            # do stuff with v and 2avs
-            # update avs structure here for newest ballot number for value
+            [mb,mv,avsSig] = parts[3:6]
+            avs, sig = avsSig.split(';')
+            
             if N == self.Q.N:
                 self.Q.add_1b(int(mb), msg, peer_wss)
+
+#                for avsChunk in avs.split(','):
+ #                   b = decode_to_bytes(avsChunk)
+                b = pickle.loads(b''.join(map(decode_to_bytes, avs.split(','))))
+                self.logger.debug("adding mb and avs: {}, {}".format(mb, b))
+                self.Q.add_avs(int(mb), b)
             else:
                 self.logger.error("got bad 1b msg")
                  
@@ -255,6 +286,7 @@ class BPConProtocol:
 
         returns list of latencies
         """
+        self.logger.debug("sending to {}".format(recipient_list))
         good_peers = 0
         peer_latencies = {}
         input_msg = None
@@ -270,7 +302,10 @@ class BPConProtocol:
                 peer_latencies[ws] = time.time() - send_start
                 self.logger.debug("input_msg: {}".format(input_msg))
                 if handler_function:
-                    handler_function(input_msg, ws)
+                    try:
+                        handler_function(input_msg, ws)
+                    except Exception as e:
+                        self.logger.critical("could not process input from {}: {}".format(ws,e))
                 good_peers += 1
             except Exception as e: # custom error handling
                 self.logger.debug("send to peer {} failed: {}".format(ws,e))
@@ -284,5 +319,5 @@ class BPConProtocol:
         self.logger.info("Peers: {}/{}".format(good_peers, len(recipient_list)))     
         self.logger.info("Peer Latencies: {}".format(peer_latencies))
         
-        if not handler_function: # TODO what is this for?
+        if not handler_function: 
             return input_msg

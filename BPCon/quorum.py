@@ -1,4 +1,4 @@
-import random
+import json
 
 class Quorum(object):
     """
@@ -14,6 +14,28 @@ class Quorum(object):
         self.peer_msgs = {} 
         self.commits = 0
         self.current_ballots = {} # list of seen maxBallots from peers
+        self.avsLookup = {}
+
+    def add_avs(self, ballot, avs):
+        MAX_AVS = 10 # TODO not hardcoded
+        ind = ballot % MAX_AVS
+        print("ind is {}".format(ind))
+        if not (ind in self.avsLookup.keys()):
+            self.avsLookup[ind] = avs
+
+    def rejecting_quorum_avs(self):
+        """ returns avs supplied by member of rejecting quorum """
+        ballot, tally = 0,0
+        for b,t in self.current_ballots.items():
+            if t > tally:
+                ballot, tally = b,t
+        
+        if tally >= self.quorum: # quorum on a better max ballot
+            return self.avsLookup[ballot]
+            #return random.choice(self.peer_msgs.keys()) # random wss from quorum that has seen a higher ballot
+        else:
+            return None # no quorum acquired
+
 
     def add_1b(self, mb, msg, peer_wss):
         if peer_wss not in self.peer_msgs.keys():
@@ -27,10 +49,6 @@ class Quorum(object):
                     self.current_ballots[mb] += 1
                 else:
                     self.current_ballots[mb] = 1
-                
-    def rejecting_quorum_member(self):
-        if max(self.current_ballots.values()) >= self.quorum:
-            return random.choice(self.peer_msgs.keys()) # random wss from quorum that has seen a higher ballot
 
     def add_2b(self, N):
         if N == self.N:

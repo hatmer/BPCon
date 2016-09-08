@@ -20,3 +20,5 @@ clean up
 web api / demo
 split op: db sort and partition / optimize
 fix orderedDict
+trim avs periodically in reconfig
+move avs into state object

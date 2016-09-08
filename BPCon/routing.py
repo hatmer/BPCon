@@ -1,9 +1,8 @@
-import hashlib
 import os
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
-from BPCon.utils import save_state, load_state
+from BPCon.utils import save_state, load_state, get_ID, decode_to_bytes
 from collections import OrderedDict
 
 class GroupManager(object):
@@ -31,13 +30,13 @@ class GroupManager(object):
             cert = fh.read()
 
         self.add_peer(self.conf['p_wss'], key + "<>" + cert)
-
         for wss in self.conf['peerlist']:
-            fname = self.conf['peer_keys'] + self.get_ID(wss)+".pubkey"
+            fname = self.conf['peer_keys'] + get_ID(wss)+".pub"
             if os.path.isfile(fname):
                 #read key and add pair to self.peers
                 with open(fname, 'r') as fh:
                     self.peers[wss] = RSA.importKey(fh.read()) 
+                    self.conf['log'].info("added {} to peers".format(wss))
             else:
                 self.conf['log'].info("missing key file for {}".format(wss))
         
@@ -46,21 +45,17 @@ class GroupManager(object):
     def quorum_size(self):
         return int((self.num_peers / 2) + (self.num_peers % 2))
 
-    def get_ID(self, sock_str):
-        encoded =  hashlib.sha1(sock_str.encode())
-        return encoded.hexdigest()
-
     def add_peer(self, sock_str, creds):
         try:
             key,cert = creds.split('<>')
             #sock_str = "wss://"+str(ip)+":"+str(port)
-            ID = self.get_ID(sock_str)
+            ID = get_ID(sock_str)
             if not sock_str in self.peers.keys():
                 key = str(key)
                 self.peers[sock_str] = RSA.importKey(key) 
                 self.conf['log'].debug("add peer: key imported")
                 # write key to file
-                with open(self.conf['peer_keys']+ID+".pubkey", 'w') as fh:
+                with open(self.conf['peer_keys']+ID+".pub", 'w') as fh:
                     fh.write(key)
                 with open("{}{}.crt".format(self.conf['peer_certs'],ID), 'w') as fh:
                     fh.write(cert)
@@ -82,7 +77,9 @@ class GroupManager(object):
     def get_all(self):
         # returns list of addresses of peers in group
         sockets = list(self.peers.keys())
+        self.conf['log'].debug("peers: {}".format(sockets))
         sockets.remove(self.conf['p_wss']) # don't want to send to self
+        print("okay")
         return sockets
 
         
@@ -96,7 +93,8 @@ class GroupManager(object):
                 rsakey = self.peers[wss]
                 h = SHA.new(msg.encode())
 
-                sigmsg = int(sig).to_bytes(256, byteorder='little')
+                #sigmsg = int(sig).to_bytes(256, byteorder='little')
+                sigmsg = decode_to_bytes(sig)
                 verifier = PKCS1_v1_5.new(rsakey)
                 if verifier.verify(h, sigmsg):
                     num_verified += 1
@@ -106,10 +104,10 @@ class GroupManager(object):
         return num_verified
 
     def save(self,gid):
-        fname = "data/bpcon_routing_{}.pkl".format(gid)
+        fname = "{}bpcon_routing_{}.pkl".format(self.conf['backup_dir'], gid)
         tosave = [self.peers, self.keyspace]
         save_state(fname,tosave)
     
     def load(self,gid):
-        (self.peers, self.keyspace) = load_state('data/bpcon_routing_{}.pkl'.format(gid))
+        (self.peers, self.keyspace) = load_state('{}bpcon_routing_{}.pkl'.format(self.conf['backup_dir'], gid))
 
