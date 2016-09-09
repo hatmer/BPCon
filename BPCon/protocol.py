@@ -133,13 +133,15 @@ class BPConProtocol:
                         self.logger.info("failure: quorum1 rejects {} for ballot {}".format(proposal, self.Q.N))
                         # update avs structure here for newest ballot number for value
                         catchup_avs = self.Q.rejecting_quorum_avs() # list of (ballot#, database_operation) tuples
-                        self.logger.info("syncing state...")
-                        for ballot, op in catchup_avs:
-                            if ballot > self.maxBal:
-                                self.state.update(ballot, op)
+                        if len(catchup_avs):
+                            self.logger.info("syncing state...")
+                            for ballot, op in catchup_avs:
+                                if ballot > self.maxBal:
+                                    self.state.update(ballot, op)
 
-                        self.maxVBal, self.maxVVal = catchup_avs[-1]   
-                        res = {'code': 2} # corrupt state failcase, host system should redo request
+                            self.maxVBal, self.maxVVal = catchup_avs[-1]   
+                            res = {'code': 2} # corrupt state resync failcase
+                            #res = {'code': 1} # rejected by quorum failcase
                 else:
                     self.logger.info("failure: quorum1 not acquired")
 
@@ -153,7 +155,7 @@ class BPConProtocol:
         
         if (int(N) > int(self.maxBal)): #maxbal type undefined behavior sometimes 
             self.maxBal = N
-            avs = {}
+            avs = "0"
         else:
             n = 256
             a = pickle.dumps(self.avs) # bytes instead of list
@@ -248,12 +250,14 @@ class BPConProtocol:
             
             if N == self.Q.N:
                 self.Q.add_1b(int(mb), msg, peer_wss)
-
-#                for avsChunk in avs.split(','):
- #                   b = decode_to_bytes(avsChunk)
-                b = pickle.loads(b''.join(map(decode_to_bytes, avs.split(','))))
-                self.logger.debug("adding mb and avs: {}, {}".format(mb, b))
-                self.Q.add_avs(int(mb), b)
+                
+                if int(mb) > self.maxBal:
+                    try:
+                        b = pickle.loads(b''.join(map(decode_to_bytes, avs.split(','))))
+                        self.logger.debug("recording mb and avs update: {}, {}".format(mb, b))
+                        self.Q.add_avs(int(mb), b)
+                    except:
+                        self.logger.debug("could not decode avs sent by {}: {}".format(peer_wss, avs))
             else:
                 self.logger.error("got bad 1b msg")
                  
@@ -288,14 +292,14 @@ class BPConProtocol:
 
         returns list of latencies
         """
-        self.logger.debug("sending to {}".format(recipient_list))
+        self.logger.debug("sending to recipients: {}".format(recipient_list))
         good_peers = 0
         peer_latencies = {}
         input_msg = None
         for ws in recipient_list:
             send_start = time.time()
             try:
-                #self.logger.debug("sending {} to {}".format(to_send, ws))
+                self.logger.info("sending {} to {}".format(to_send, ws))
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
                 self.logger.debug("to_send: {}".format(to_send))
                 yield from client_socket.send(to_send)
@@ -306,9 +310,11 @@ class BPConProtocol:
                 if handler_function:
                     try:
                         handler_function(input_msg, ws)
+                        good_peers += 1
                     except Exception as e:
                         self.logger.critical("could not process input from {}: {}".format(ws,e))
-                good_peers += 1
+                else:
+                    good_peers += 1
             except Exception as e: # custom error handling
                 self.logger.debug("send to peer {} failed: {}".format(ws,e))
                 peer_latencies[ws] = -1
