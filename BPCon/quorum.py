@@ -19,7 +19,6 @@ class Quorum(object):
     def add_avs(self, ballot, avs):
         MAX_AVS = 10 # TODO not hardcoded
         ind = ballot % MAX_AVS
-        print("ind is {}".format(ind))
         if not (ind in self.avsLookup.keys()):
             self.avsLookup[ind] = avs
 

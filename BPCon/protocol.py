@@ -50,7 +50,7 @@ class BPConProtocol:
         self.peers = GroupManager(conf)
         self.peers.init_local_group()
         self.state = state
-        self.state.groups['G1'] = self.peers
+        #self.state.groups['G1'] = self.peers
 
         self.ctx = get_ssl_context(conf['peer_certs'])
         self.pending = None
@@ -135,8 +135,10 @@ class BPConProtocol:
                         catchup_avs = self.Q.rejecting_quorum_avs() # list of (ballot#, database_operation) tuples
                         self.logger.info("syncing state...")
                         for ballot, op in catchup_avs:
-                            self.state.update(ballot, op)
-                            
+                            if ballot > self.maxBal:
+                                self.state.update(ballot, op)
+
+                        self.maxVBal, self.maxVVal = catchup_avs[-1]   
                         res = {'code': 2} # corrupt state failcase, host system should redo request
                 else:
                     self.logger.info("failure: quorum1 not acquired")

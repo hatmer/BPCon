@@ -55,6 +55,8 @@ class Autobot:
         #self.logger.info("reconfig did nothing")
         action = None
 
+        # trim avs size
+
         # failed and bad peer removal (reads dict of peer:latency/fail(0)/bad(-1))
 
         # group size check for split/merge

@@ -34,6 +34,7 @@ class Congregate:
             self.loop = asyncio.get_event_loop()
             # Create BPCon instance
             self.bpcon = BPConProtocol(self.conf, self.state)
+            self.state.groups['G1'] = self.bpcon.peers # connect BPCon to Congregate instance
             self.paxos_server = websockets.serve(self.bpcon.main_loop, self.conf['ip_addr'], self.conf['port'], ssl=self.conf['ssl'])
             self.loop.run_until_complete(self.paxos_server)
             log.info("Started BPCon on port {}".format(self.conf['port']))
@@ -52,6 +53,7 @@ class Congregate:
             # Add self to local group
             log.debug("adding self to local group")
             self.join_request()
+            
 
             # Testing 
             if self.conf['is_client']:
@@ -65,9 +67,9 @@ class Congregate:
                     self.local_request("P,test,value3")
                     self.local_request("D,test2,")
                     self.local_request(request)
-                    self.clone()
 
                 log.debug("requests complete")     
+
 
         except Exception as e:
             log.info(e)
@@ -152,18 +154,17 @@ class Congregate:
         except Exception as e:
             log.debug(e)
 
-    def handle_reconfig_request(self, epoch=0):
-        toreturn = self.bpcon.bmsgs
-        if epoch != 0:
-            self.clone()
-            with open('data/clone.tar.gz', 'r') as fh:
-                toreturn += "<>{}".format(fh.read())
-                log.debug("cloned state added successfully")
-
-        return toreturn    
+    def handle_reconfig_request(self):
+        """ Create and return state clone """
+        self.clone()
+        with open('data/clone.tar.gz', 'r') as fh:
+            toreturn = fh.read()
+            log.debug("cloned state added successfully")
+            return toreturn    
 
     def make_reconfig_request(self, wss):
-        # epoch = current epoch
+        """ Request state clone """ 
+        # TODO send a request
         pass
 
 

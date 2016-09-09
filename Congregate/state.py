@@ -6,20 +6,22 @@ import time
 
 class StateManager:
     """ Provides system state variables and functions """
-    def __init__(self, conf): # init_state=None):
+    def __init__(self, conf):
         self.log = conf['log']
+
+        # Congregate
         self.addr = conf['c_wss']
         self.groups = {}
         self.groups['G0'] = GroupManager(conf) # (members, keyspace)
-        self.groups['G1'] = GroupManager(conf) # overwritten by BPCon
+        self.groups['G1'] = GroupManager(conf) # overwritten by BPCon local group
         self.groups['G2'] = GroupManager(conf)
-        
-        self.db = InMemoryStorage()
-
         self.group_p1_hashval = None 
         self.lock = 'normal'     # normal, locked,  managing1, managing2, awaiting
         self.timer = 0.0
         
+        # BPCon
+        self.db = InMemoryStorage()
+
         # local stats
         self.routing_cache = {}
         self.peer_latencies = (0,0) # (# records, weighted average)
@@ -38,7 +40,6 @@ class StateManager:
                 return
 
         t,k,v = val.split(',')
-
         
         #DB requests
         if t == 'P':
@@ -47,6 +48,7 @@ class StateManager:
             self.db.delete(k)
         if t == 'A': # Adding peer: k is wss, v is key
             self.groups['G1'].add_peer(k,v)
+        
         #Group membership requests
         elif t == "S": # Split: v is initiator wss
             self.log.debug("splitting")

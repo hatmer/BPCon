@@ -162,8 +162,11 @@ class CongregateProtocol:
         
         # add to local-group routing table
         request = "A,{},{}<>{}".format(wss,pubkey,cert)
-        added = yield from self.bpcon_request(request)
-        self.log.debug("join request result: {}".format(added))
+        res = yield from self.bpcon_request(request)
+        if res['code'] == 2:
+            res = yield from self.bpcon_request(request) # redo the request once if a resync was performed
+        
+        self.log.debug("join request result: {}".format(res))
         
         # TODO notify neighbor groups of membership change
         
