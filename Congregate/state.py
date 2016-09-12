@@ -1,6 +1,7 @@
 from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
 from Crypto.Hash import SHA
+from collections import OrderedDict
 import pickle
 import time
 
@@ -10,7 +11,7 @@ class StateManager:
         self.log = conf['log']
 
         # Congregate
-        self.addr = conf['c_wss']
+        self.addr = conf['p_wss']
         self.groups = {}
         self.groups['G0'] = GroupManager(conf) # (members, keyspace)
         self.groups['G1'] = GroupManager(conf) # overwritten by BPCon local group
@@ -52,31 +53,32 @@ class StateManager:
         #Group membership requests
         elif t == "S": # Split: v is initiator wss
             self.log.debug("splitting")
-            peers = self.groups['G1'].peers.keys() # array of wss
+            peers = sorted(list(self.groups['G1'].peers.keys())) # array of wss
             l = int(len(peers)/2)
             list_a = peers[:l]
             list_b = peers[l:] # these nodes will be in the new group
             keyspace = self.groups['G1'].keyspace
             diff = (keyspace[1] - keyspace[0]) / 2
             mid = keyspace[0] + diff
-
+            
             if self.addr in list_a:
                 self.groups['G2'].peers = OrderedDict()
                 for wss in list_b:
                     self.groups['G2'].peers[wss] = self.groups['G1'].peers[wss]
                     del self.groups['G1'].peers[wss]
-                
                 self.groups['G1'].keyspace = (keyspace[0],mid)
                 self.groups['G2'].keyspace = (mid,keyspace[1])
+                return self.db.split(0,mid)
+
 
             elif self.addr in list_b:
                 self.groups['G0'].peers = OrderedDict()
                 for wss in list_a:
                     self.groups['G0'].peers[wss] = self.groups['G1'].peers[wss]
                     del self.groups['G1'].peers[wss]
-
                 self.groups['G0'].keyspace = (keyspace[0],mid)
                 self.groups['G1'].keyspace = (mid,keyspace[1])
+                return self.db.split(1, mid) 
             
             else:
                 self.log.error("inconsistent state. not participating in split operation!")

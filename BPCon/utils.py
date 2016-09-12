@@ -32,3 +32,10 @@ def encode_as_ints(val):
 
 def decode_to_bytes(val):
     return int(val).to_bytes(256, byteorder='little')
+
+def get_hash_index(key):
+    """ returns number between 0 and 1 """
+    h = hashlib.sha256(key)
+    n = int(h.hexdigest(),base=16)
+    return '%f' % (float(1)/n) # string representation of decimal
+    

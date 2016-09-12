@@ -30,7 +30,7 @@ class CongregateProtocol:
     ### Interface with BPCon in-memory database ###
 
     def got_commit_result(self, future):
-        """ Callback for BPCon commit """
+        """ Callback for BPCon commit: effectively a timout """
         if future.done():
             #do cleanup
             if not future.cancelled():
@@ -42,7 +42,7 @@ class CongregateProtocol:
 
 
     @asyncio.coroutine
-    def bpcon_request(self, msg, is_retry=0):
+    def bpcon_request(self, msg):
         """ Commit update to BPCon in-memory database """
         self.log.debug("making request: {}".format(msg)) 
         bpcon_task = asyncio.Future()
@@ -170,9 +170,6 @@ class CongregateProtocol:
         
         # TODO notify neighbor groups of membership change
         
-
-
-
 
     def keyspace_update(self, update):
         pass

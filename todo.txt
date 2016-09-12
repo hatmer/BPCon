@@ -22,3 +22,4 @@ split op: db sort and partition / optimize
 fix orderedDict
 trim avs periodically in reconfig
 move avs into state object
+change peers data structure to dict?

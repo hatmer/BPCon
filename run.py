@@ -69,7 +69,8 @@ class Congregate:
                     self.local_request(request)
 
                 log.debug("requests complete")     
-
+            else:
+                self.local_request("S,,")
 
         except Exception as e:
             log.info(e)
@@ -175,7 +176,7 @@ class Congregate:
         self.congregate_server.close()
         print("\nPeer Groups:")
         for gname, rmgr in self.state.groups.items():
-            print("{}: {}".format(gname, list(rmgr.peers.keys())))
+            print("{}: {} {}".format(gname, list(rmgr.peers.keys()), rmgr.keyspace))
     
     def direct_msg(self, msg):
         msg_type = msg[0]
