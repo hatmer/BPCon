@@ -84,7 +84,7 @@ class StateManager:
                 self.log.error("inconsistent state. not participating in split operation!")
         
 
-        # congregate requests
+        # congregate requests 
         elif t == 'G': 
             if k == 'lock': #op is lock request
                 self.log.debug("attempting to acquire lock")
@@ -109,6 +109,7 @@ class StateManager:
                 self.log.info("got bad group request: ignoring")
     
     def group_update(self, opList):
+        """ atomic state updates inside lock """
         # TODO modify for rollbackable
         self.log.info("performing group operations: {}".format(opList))
         try:

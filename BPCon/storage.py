@@ -24,7 +24,7 @@ class InMemoryStorage(object):
         """ delete one half of keystore for group split operation """
         midKey = None 
         for key in self.kvstore.keys(): # TODO make more efficient for better performance
-            if key > str(keyspace_mid):
+            if key > str(keyspace_mid): # use iloc to estimate midpoint
                 midKey = self.kvstore.index(key)
                 break
 
