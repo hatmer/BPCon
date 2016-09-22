@@ -4,3 +4,12 @@ Scalable, consistent, and churn-adaptive datastore build according to the archit
 
 Replication using a byzantined Paxos variant, [Python-BPCon](https://github.com/hatmer/python-bpcon) 
 
+## Requirements
+* python3.4
+* twisted
+* asyncio
+* websockets
+* pycrypto
+* sortedcontainers
+
+make sure to add these to your PYTHONPATH
