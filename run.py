@@ -71,6 +71,7 @@ class Congregate:
                 log.debug("requests complete")     
             else:
                 self.local_request("S,,")
+                self.make_2pc_request("merge", "G2", self.state.groups['G1'].) # merge with group G2
 
         except Exception as e:
             log.info(e)

@@ -117,18 +117,19 @@ class StateManager:
                 t,g,a,b = item.split(';') # t is type, g is Group#
                 if g not in ['G0', 'G1', 'G2']:
                     raise ValueError("key is not a valid group")
-                if t == 'A': # Adding peer: a is wss, b is key
-                    self.log.info("adding peer")
-                    self.groups[g].add_peer(a,b)
-                elif t == 'R': # Removing peer: a is wss, b is placeholder
-                    self.groups[g].remove_peer(a)
-                elif t == 'K': # Keyspace update: a is lower, b is upper
-                    self.groups[g].keyspace = (float(a),float(b))
-                elif t == 'M': # Migrate peer: a is wss, b is destination group, b does an add
+                #if t == 'A': # Adding peer: a is wss, b is key
+                #    self.log.info("adding peer")
+                #    self.groups[g].add_peer(a,b)
+                #elif t == 'R': # Removing peer: a is wss, b is placeholder
+                #    self.groups[g].remove_peer(a)
+                #elif t == 'K': # Keyspace update: a is lower, b is upper
+                #    self.groups[g].keyspace = (float(a),float(b))
+                if t == 'M': # Migrate peer: a is wss, b is destination group, b does an add
                     pubkey = self.groups[g].peers[a]
                     self.groups[b].peers[a] = pubkey
                     self.groups[g].remove_peer(a)
-                
+                elif t == 'K':
+                    self.groups[g].keyspace = (float(a),float(b))
                 else:
                     self.log.info("unrecognized group op: {}".format(item))
 

@@ -71,6 +71,7 @@ class CongregateProtocol:
         op = request[3:]
         if phase == "P1":  # is P1 (got requesthash)
             self.log.info("remote P1 requesthash is {}".format(op))
+            # TODO calculate independent requesthash, check if is appropriate
             local_p1_msg = "G,{},{}".format("lock", op)
             lock_acquired = yield from self.bpcon_request(local_p1_msg) # acquire group lock
             response = "P1,ACK"
@@ -94,7 +95,7 @@ class CongregateProtocol:
         
 
     @asyncio.coroutine
-    def make_2pc_request(self, request, recipients=[]):
+    def make_2pc_request(self, request_type, target_group, ):
         """
         Initiate multigroup update/request and notify neighbors of update
         """
@@ -108,28 +109,24 @@ class CongregateProtocol:
         self.log.debug("bpcon lock acquired: {}".format(lock_acquired))
         
         if lock_acquired: 
-            if len(recipients) == 0:
-                # doing a local group operation
-                request_success = yield from self.bpcon_request(request)
-                if request_success:
-                    self.log.info("local group operation complete")
-            else:
-                # make 2pc P1 request to remote group
-                remote_p1_msg = "P1,{}".format(requesthash)
-                self.log.info("sending {}".format(remote_p1_msg))
-                p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipients)
-                self.log.info("P1 response: {}".format(p1_response)) 
+            # make 2pc P1 request to remote group
+            remote_p1_msg = "P1,{}".format(request_type) 
+            self.log.info("sending {}".format(remote_p1_msg))
+            p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipients)
+            self.log.info("P1 response: {}".format(p1_response)) 
+        
+            if p1_response == "P1,ACK":  
+            # commit operation locally
+                p2_success = yield from self.bpcon_request(request) # local_p2_msg
             
-                if p1_response == "P1,ACK":  
-	                # commit operation locally
-                    p2_success = yield from self.bpcon_request(request) # local_p2_msg
-                
-                    if p2_success: 
-                        self.log.info("P2 local commit succeeded. sending P2 request")
-                        remote_p2_msg = "P2,{}".format(request)
-                        p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipients)
-                        if p2_response == "P2,ACK":
-                            self.log.info("Congregate 2pc request completed successfully")
+                if p2_success: 
+                    self.log.info("P2 local commit succeeded. sending P2 request")
+                    remote_p2_msg = "P2,{}".format(request)
+                    p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipients)
+                    if p2_response == "P2,ACK":
+                        self.log.info("Congregate 2pc request completed successfully")
+        else:
+            self.log.info("Lock not acquired")
             
 
     ### Internal regulatory functions ###
@@ -182,12 +179,12 @@ class CongregateProtocol:
         Formats internal group consensus messages for:
             - split
             - merge
-            - migrate
+            - migrate & add/remove peer
             - keyspace change
             - modify peer group membership
 
         Message format:  local/other, change type, data
-
+ss
         0: paxos operation
         1: routing
         2: congregate operation
@@ -202,32 +199,13 @@ class CongregateProtocol:
         opList = []
         #msg = "0&" # prepend if conf['use_single_port'] = 1
         if request_type == "split":
-            # action: divide group and keyspace in half
-            # Initiator node goes in first group
-            # 1. get new groups and keyspaces
             self.log.debug("constructing split request")
-            peers = sorted(self.bpcon.state.groups['G1'].peers)
-            l = int(len(peers)/2)
-            list_a = peers[:l]
-            list_b = peers[l:] # these nodes will be in the new group
+            opList.append("S,,")
 
-            keyspace = self.bpcon.state.groups['G1'].keyspace
-
-            diff = (keyspace[1] - keyspace[0]) / 2
-            mid = keyspace[0] + diff
-
-            opList.append("S,G1,{}".format(self.conf['c_wss'])) #TODO check if sending wss does anything useful
-
-            #for node in list_b:
-            #    opList.append("M;G1;{};G1".format(node))
-            
-            #opList.append("K;G1;{};{}".format(keyspace[0],mid))
-            #opList.append("K;G1;{};{}".format(mid,keyspace[1]))
-
-        elif request_type == "remove_peer":
+        elif request_type == "remove":
             op = "R;G1;{};".format(wss,None)
             print(op)
-        elif request_type == "add_peer":
+        elif request_type == "add":
             op = "A;G1;{};{}".format(wss,key)
             print(op)
         else: # multigroup operations 
@@ -235,9 +213,9 @@ class CongregateProtocol:
             if request_type == "merge":
                 # ks, peerlist
                 print("merging groups in dict: {}".format(args.keys()))
-            elif request_type == "migrate":
+            #elif request_type == "migrate":
                 #"G,commit,M;G1;wss://localhost:9000;G1" 
-                pass
+            #    pass
             elif request_type == "keyspace":
                 # ks
                 pass

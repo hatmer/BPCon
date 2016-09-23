@@ -17,7 +17,7 @@ class GroupManager(object):
     def __init__(self, conf):
         self.conf = conf
         self.keyspace = (0.0,0.0)
-        self.peers = OrderedDict() # group members
+        self.peers = {} #OrderedDict() # group members
         self.num_peers = 0
 
     def init_local_group(self):    
