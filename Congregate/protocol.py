@@ -86,9 +86,7 @@ class CongregateProtocol:
 
         if lock_acquired:                
             self.log.debug("returning {}".format(response))
-            return response
-            
-            
+            return response      
         #else:
             # other 2pc request currently being processed
             #pass
