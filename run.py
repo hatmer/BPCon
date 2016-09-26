@@ -14,7 +14,7 @@ import time
 import hashlib
 
 from BPCon.protocol import BPConProtocol
-from Congregate.protocol import CongregateProtocol
+from Congregate.cProtocol import CongregateProtocol
 from Congregate.state import StateManager
 from Congregate.configManager import ConfigManager, log
 from BPCon.utils import shell, get_ID
@@ -70,8 +70,11 @@ class Congregate:
 
                 log.debug("requests complete")     
             else:
+                #self.c.request_split()
                 self.local_request("S,,")
-                self.make_2pc_request("merge", "G2", self.state.groups['G1'].) # merge with group G2
+
+                #self.c.request_merge("G2")
+                self.group_request("M", "G2")
 
         except Exception as e:
             log.info(e)
@@ -139,9 +142,9 @@ class Congregate:
         log.info("replicating {}".format(msg))
         self.loop.run_until_complete(self.c.bpcon_request(msg))
 
-    def group_request(self, msg):
+    def group_request(self, req_type, target_group):
         log.debug("group request initiated")
-        self.loop.run_until_complete(self.c.make_2pc_request(msg))
+        self.loop.run_until_complete(self.c.make_2pc_request(req_type, target_group))
 
     def join_request(self):
         """ Command Congregate instance to join its peers by supplying credentials """

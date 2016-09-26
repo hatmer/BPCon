@@ -5,14 +5,17 @@ from sortedcontainers import SortedDict
 class InMemoryStorage(object):
     def __init__(self):
         self.kvstore = SortedDict() # hashtable
+    
     def get(self, k):
         try:
             return self.kvstore[k]
         except:
             return 1
+    
     def put(self, k, v):
         self.kvstore[k] = v
         return 0
+
     def delete(self,k):
         try:
             del self.kvstore[k]

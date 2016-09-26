@@ -2,6 +2,7 @@ import ssl
 import subprocess
 import pickle 
 import hashlib
+import base64
 
 def get_ID(sock_str):
     encoded =  hashlib.sha1(sock_str.encode())
@@ -27,11 +28,13 @@ def shell(command):
     except Exception as e:
         print("shell command failed: {}".format(e))
 
-def encode_as_ints(val):
-    return str(int.from_bytes(val, byteorder='little'))
+def encode_for_transport(val):
+    #return str(int.from_bytes(val, byteorder='little'))
+    return base64.b64encode(val).decode()
 
 def decode_to_bytes(val):
-    return int(val).to_bytes(256, byteorder='little')
+    #return int(val).to_bytes(256, byteorder='little')
+    return base64.b64decode(val)
 
 def get_hash_index(key):
     """ returns number between 0 and 1 """

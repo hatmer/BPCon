@@ -8,7 +8,7 @@ from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 
 from BPCon.quorum import Quorum
-from BPCon.utils import get_ssl_context, encode_as_ints, decode_to_bytes
+from BPCon.utils import get_ssl_context, encode_for_transport, decode_to_bytes
 from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
 
@@ -152,22 +152,21 @@ class BPConProtocol:
         
     def phase1b(self, N):
         # bmsgs := bmsgs U ("1b", bal, acceptor, self.avs, self.maxVBal, self.maxVVal)
-        
         if (int(N) > int(self.maxBal)): #maxbal type undefined behavior sometimes 
             self.maxBal = N
             avs = "0"
         else:
             n = 256
             a = pickle.dumps(self.avs) # bytes instead of list
-            chunks = [a[i:i + n] for i in range(0, len(a), n)] # split into smaller bytestrings
-            avs = ','.join(map(encode_as_ints, chunks)) 
+            #chunks = [a[i:i + n] for i in range(0, len(a), n)] # split into smaller bytestrings
+            #avs = ','.join(map(encode_as_ints, chunks)) 
+            avs = encode_for_transport(a)
         
         msg_1b = "1b&{}&{}&{}&{}&{}".format(str(time.time()),N,self.maxVBal,self.maxVVal,avs)
         msg_hash = SHA.new(msg_1b.encode())
         sig = self.signer.sign(msg_hash)
-        
         #tosend = msg_1b + ";" + str(int.from_bytes(sig, byteorder='little'))
-        tosend = msg_1b + ";" + encode_as_ints(sig)
+        tosend = msg_1b + ";" + encode_for_transport(sig)
         self.logger.debug("sending 1b -> {}".format(tosend))
         return tosend
             
@@ -212,7 +211,7 @@ class BPConProtocol:
             input_msg = yield from websocket.recv()
             self.logger.debug("< {}".format(input_msg))
             host,port = websocket.remote_address
-            output_msg = self.handle_msg(input_msg, "wss://{}:{}".format(host,port))
+            output_msg = self.handle_msg(str(input_msg), "wss://{}:{}".format(host,port))
             if output_msg:
                 yield from websocket.send(output_msg)
                 self.bmsgs.append(output_msg)
@@ -239,6 +238,7 @@ class BPConProtocol:
         
         if msg_type == "1a" and num_parts == 3:
             # a peer is leader for a ballot, requesting votes
+            print('a')
             output_msg = self.phase1b(N)
             return output_msg
             
@@ -253,7 +253,8 @@ class BPConProtocol:
                 
                 if int(mb) > self.maxBal:
                     try:
-                        b = pickle.loads(b''.join(map(decode_to_bytes, avs.split(','))))
+                        #b = pickle.loads(b''.join(map(decode_to_bytes, avs.split(','))))
+                        b = pickle.loads(decode_to_bytes(avs))
                         self.logger.debug("recording mb and avs update: {}, {}".format(mb, b))
                         self.Q.add_avs(int(mb), b)
                     except:

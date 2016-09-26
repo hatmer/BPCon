@@ -4,6 +4,7 @@ from Crypto.Hash import SHA
 from collections import OrderedDict
 import pickle
 import time
+import zlib
 
 class StateManager:
     """ Provides system state variables and functions """
@@ -28,6 +29,10 @@ class StateManager:
         self.peer_latencies = (0,0) # (# records, weighted average)
         self.failed_peers = {}
         self.bad_peers = {}
+
+    def update_wss(self, wss):
+        """ Update X000 websocket port to X001 """
+        return wss[:-1]+"1"
 
     def update(self, ballot_num=-1, val=None):
         self.log.debug("updating state: ballot #{}, op: {}".format(ballot_num, val))
@@ -64,7 +69,7 @@ class StateManager:
             if self.addr in list_a:
                 self.groups['G2'].peers = OrderedDict()
                 for wss in list_b:
-                    self.groups['G2'].peers[wss] = self.groups['G1'].peers[wss]
+                    self.groups['G2'].peers[self.update_wss(wss)] = self.groups['G1'].peers[wss]
                     del self.groups['G1'].peers[wss]
                 self.groups['G1'].keyspace = (keyspace[0],mid)
                 self.groups['G2'].keyspace = (mid,keyspace[1])
@@ -74,7 +79,7 @@ class StateManager:
             elif self.addr in list_b:
                 self.groups['G0'].peers = OrderedDict()
                 for wss in list_a:
-                    self.groups['G0'].peers[wss] = self.groups['G1'].peers[wss]
+                    self.groups['G0'].peers[self.update_wss(wss)] = self.groups['G1'].peers[wss]
                     del self.groups['G1'].peers[wss]
                 self.groups['G0'].keyspace = (keyspace[0],mid)
                 self.groups['G1'].keyspace = (mid,keyspace[1])
@@ -101,41 +106,54 @@ class StateManager:
                     if vhash != self.group_p1_hashval:
                         self.log.info("locked state, rejecting invalid commit value")
                         return
-                    self.group_update(v)
-                    # release lock
-                    self.lock = 'normal'
-                    self.log.debug("lock released")
+
+                    # make a backup copy of current state
+                    self.image_state()
+                    
+                    # update and ensure rollback in case of update failure
+                    try:
+                        self.group_update(k,v)
+                        self.lock = 'normal'
+                        return 0
+
+                    except:
+                        self.load_state()
+                        self.lock = 'normal'
+                        return 1
+
+
             else:
                 self.log.info("got bad group request: ignoring")
     
-    def group_update(self, opList):
+    def group_update(self, target_group, opList):
         """ atomic state updates inside lock """
         # TODO modify for rollbackable
         self.log.info("performing group operations: {}".format(opList))
         try:
             for item in opList.split('<>'): #  keyspace and group membership
-                t,g,a,b = item.split(';') # t is type, g is Group#
+                
+                opType, group, data = item.split(';') 
+                
                 if g not in ['G0', 'G1', 'G2']:
                     raise ValueError("key is not a valid group")
-                #if t == 'A': # Adding peer: a is wss, b is key
-                #    self.log.info("adding peer")
-                #    self.groups[g].add_peer(a,b)
-                #elif t == 'R': # Removing peer: a is wss, b is placeholder
-                #    self.groups[g].remove_peer(a)
-                #elif t == 'K': # Keyspace update: a is lower, b is upper
-                #    self.groups[g].keyspace = (float(a),float(b))
-                if t == 'M': # Migrate peer: a is wss, b is destination group, b does an add
+                
+                if t == 'M': # Merge
                     pubkey = self.groups[g].peers[a]
                     self.groups[b].peers[a] = pubkey
                     self.groups[g].remove_peer(a)
-                elif t == 'K':
-                    self.groups[g].keyspace = (float(a),float(b))
+                
+                #elif t == 'K':
+                #    self.groups[g].keyspace = (float(a),float(b))
+                
                 else:
                     self.log.info("unrecognized group op: {}".format(item))
 
         except Exception as e:
             self.log.info("got bad value in group update: {}".format(e))
 
+    def get_compressed_state(self):
+        toStore = pickle.dumps([self.groups, self.db])
+        return zlib.compress(toStore)
 
     def image_state(self):
         # create disc copy of system state 

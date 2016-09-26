@@ -79,7 +79,6 @@ class GroupManager(object):
         sockets = list(self.peers.keys())
         self.conf['log'].debug("peers: {}".format(sockets))
         sockets.remove(self.conf['p_wss']) # don't want to send to self
-        print("okay")
         return sockets
 
         
