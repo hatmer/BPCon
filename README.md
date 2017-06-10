@@ -6,7 +6,6 @@ Replication using a byzantined Paxos variant, [Python-BPCon](https://github.com/
 
 ## Requirements
 * python3.4
-* twisted
 * asyncio
 * websockets
 * pycrypto

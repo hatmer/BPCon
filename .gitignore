@@ -3,19 +3,20 @@
 *~
 *.swp
 BPCon/*.swp
+Congregate/*.swp
 *.pyc
 *.egg
 *.egg-info
 *.pkl
 *.tar.gz
-*.txt
 
 ### Specific Files ###
 push.sh
-todo.txt
 
 ### Directories ###
 creds/
 __pycache__
 BPCon/__pycache__
 .cache
+Python-3.4.4/
+virtualenv/
