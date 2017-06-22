@@ -12,11 +12,10 @@ from Crypto.PublicKey import RSA
 from BPCon.utils import shell
 
 ### Logging Configuration ###
-#FORMAT = '%(levelname)s [%(filename)s %(funcName)s] %(message)s'
-#logging.basicConfig(format=FORMAT)
 
 fileConfig('data/logging_config.ini')
 log = logging.getLogger()
+
 #############################
 
 class ConfigManager:
@@ -47,7 +46,7 @@ class ConfigManager:
         conf['keyfile'] = self.config['creds']['keyfile']
 
         # Logging
-        log.info("verifying credentials")
+        log.info("verifying credentials...")
         # verify credential file tree
         if not os.path.exists('data/creds'):
             shell("mkdir -p data/creds")
@@ -66,7 +65,8 @@ class ConfigManager:
             log.info("Signing certificate")
             shell("openssl req -new -subj '/C=SE/ST=XX/L=XX/O=XX/CN=localhost' -key data/creds/local/server.key -out data/creds/local/server.csr")
             shell("openssl x509 -req -days 365 -in data/creds/local/server.csr -signkey data/creds/local/server.key -out data/creds/local/server.crt")
-            
+        log.info("credentials okay")
+
         conf['use_single_port'] = bool(self.config['system']['use_single_port'])
         conf['config_file'] = self.config['state']['config_file']
         conf['backup_dir'] = self.config['state']['backup_dir']

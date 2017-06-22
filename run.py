@@ -18,6 +18,7 @@ from Congregate.cProtocol import CongregateProtocol
 from Congregate.state import StateManager
 from Congregate.configManager import ConfigManager, log
 from BPCon.utils import shell, get_ID
+from time import sleep
 
 if len(sys.argv) == 2:
     configFile = sys.argv[1]
@@ -59,7 +60,9 @@ class Congregate:
             if self.conf['is_client']:
                 #self.c.reconfig()
                 log.debug("is client. making test requests")
+                sleep(1) # waiting for peer to join
                 for x in range(1):
+                    # emulate a running system by populating kvstore and increasing ballot #
                     request = "P,{},hello{}".format(x,x)
                     self.local_request("P,test,value")
                     self.local_request("P,test1,value1")
@@ -67,14 +70,18 @@ class Congregate:
                     self.local_request("P,test,value3")
                     self.local_request("D,test2,")
                     self.local_request(request)
-
-                log.debug("requests complete")     
+                log.info("requests complete")     
+                log.info("cloning state")
+                self.clone()
+                #log.info("doing nothing...")
             else:
                 #self.c.request_split()
+                log.info("testing split...")
                 self.local_request("S,,")
 
+                #log.info("testing merge...")
                 #self.c.request_merge("G2")
-                self.group_request("M", "G2")
+                #self.group_request("M", "G2")
 
         except Exception as e:
             log.info(e)
@@ -85,7 +92,6 @@ class Congregate:
         """
         startup routine
         Loads from cloned state
-
         """
         # clean working dir and extract config, creds, and state
         log.info("Cleaning working directory...")
@@ -115,7 +121,6 @@ class Congregate:
             ownCert = "data/creds/local/server.crt"
             ownPubKey = "data/creds/local/server.pub"
 
-            
             ID = get_ID(self.conf['p_wss'])  
             
             certCopy = "data/creds/peers/certs/{}.crt".format(ID)

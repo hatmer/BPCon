@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#killall xterm
+killall xterm
 cd ..
 rm -rf demoCopy/*
-cp -r Congregate/* demoCopy/
+cp -r congregate/* demoCopy/
 
-cd demoCopy
-python run.py demo_config.ini
-#sleep 1
-#cd ../Congregate
-#xterm -hold -e 'python run.py' &
+cd congregate
+xterm -fa 'Monospace' -fs 14 -hold -e 'python run.py' &
+sleep 1
+cd ../demoCopy
+xterm -fa 'Monospace' -fs 14 -hold -e 'python run.py demo_config.ini' &

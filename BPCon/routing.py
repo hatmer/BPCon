@@ -23,13 +23,14 @@ class GroupManager(object):
     def init_local_group(self):    
         self.keyspace = (0.0,1.0)
 
-        # add self
+        # add self to local group
         with open(self.conf['keyfile'], 'r') as fh:
             key = fh.read()
         with open(self.conf['certfile'], 'r') as fh:
             cert = fh.read()
-
         self.add_peer(self.conf['p_wss'], key + "<>" + cert)
+
+        # add peers from config
         for wss in self.conf['peerlist']:
             fname = self.conf['peer_keys'] + get_ID(wss)+".pub"
             if os.path.isfile(fname):
@@ -74,7 +75,7 @@ class GroupManager(object):
             self.conf['log'].debug("remove failed")
             return False
 
-    def get_all(self):
+    def get_peers(self):
         # returns list of addresses of peers in group
         sockets = list(self.peers.keys())
         self.conf['log'].debug("peers: {}".format(sockets))

@@ -72,7 +72,7 @@ class BPConProtocol:
             1: request failed
             2: request failed + resynced state
         """
-        print(self.maxBal)
+        print("maxBal: ", self.maxBal)
         # bmsgs := bmsgs U ("1a", bal)
         #if self.Q:
         #    self.logger.error("Bad Client: prior quorum being managed for ballot {}".format(self.Q.N))
@@ -84,8 +84,8 @@ class BPConProtocol:
 
         self.pending = future
         self.maxBal = self.maxVBal + 1
-        recipients = self.peers.get_all()
-        self.logger.debug("local group is {}".format(recipients))
+        recipients = self.peers.get_peers()
+        self.logger.debug("local group recipients: {}".format(recipients))
 
         if not len(recipients): # no localgroup peers
             self.maxVBal += 1
@@ -94,7 +94,6 @@ class BPConProtocol:
             self.avs.append((self.maxBal, proposal))
             res = {'code': 0} # success case
             
-
         else:
             self.Q = Quorum(self.maxBal, self.peers.num_peers)
             self.logger.debug("creating Quorum object with N={}, num_peers={}".format(self.maxBal, self.peers.num_peers))
@@ -147,7 +146,7 @@ class BPConProtocol:
 
         if not self.pending.done():
             self.pending.set_result(res)
-        self.logger.debug("bpcon request finished")    
+        self.logger.info("bpcon request finished")    
         return res 
         
     def phase1b(self, N):
@@ -238,7 +237,7 @@ class BPConProtocol:
         
         if msg_type == "1a" and num_parts == 3:
             # a peer is leader for a ballot, requesting votes
-            print('a')
+            self.logger.debug("received 1a from {}".format(peer_wss))
             output_msg = self.phase1b(N)
             return output_msg
             
@@ -300,7 +299,8 @@ class BPConProtocol:
         for ws in recipient_list:
             send_start = time.time()
             try:
-                self.logger.info("sending {} to {}".format(to_send, ws))
+                self.logger.debug("sending {} to {}".format(to_send, ws))
+                self.logger.info("sending 1a...")
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
                 self.logger.debug("to_send: {}".format(to_send))
                 yield from client_socket.send(to_send)
@@ -326,7 +326,7 @@ class BPConProtocol:
                     self.logger.debug("no socket to close")
 
         self.logger.info("Peers: {}/{}".format(good_peers, len(recipient_list)))     
-        self.logger.info("Peer Latencies: {}".format(peer_latencies))
+        self.logger.debug("Peer Latencies: {}".format(peer_latencies))
         
         if not handler_function: 
             return input_msg

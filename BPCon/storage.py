@@ -36,6 +36,7 @@ class InMemoryStorage(object):
 
         else:
             self.kvstore = self.kvstore.items()[:midKey]
+        print("split complete. kvstore is now:")
         print(self.kvstore)
         return 0
 

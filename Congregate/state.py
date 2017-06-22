@@ -31,7 +31,7 @@ class StateManager:
         self.bad_peers = {}
 
     def update_wss(self, wss):
-        """ Update X000 websocket port to X001 """
+        """ Update websocket port XXX0 to XXX1 """
         return wss[:-1]+"1"
 
     def update(self, ballot_num=-1, val=None):
@@ -57,16 +57,17 @@ class StateManager:
         
         #Group membership requests
         elif t == "S": # Split: v is initiator wss
-            self.log.debug("splitting")
+            self.log.info("splitting")
             peers = sorted(list(self.groups['G1'].peers.keys())) # array of wss
             l = int(len(peers)/2)
             list_a = peers[:l]
-            list_b = peers[l:] # these nodes will be in the new group
+            list_b = peers[l:] 
             keyspace = self.groups['G1'].keyspace
             diff = (keyspace[1] - keyspace[0]) / 2
             mid = keyspace[0] + diff
             
             if self.addr in list_a:
+                self.log.debug("I am in group a")
                 self.groups['G2'].peers = OrderedDict()
                 for wss in list_b:
                     self.groups['G2'].peers[self.update_wss(wss)] = self.groups['G1'].peers[wss]
@@ -75,8 +76,10 @@ class StateManager:
                 self.groups['G2'].keyspace = (mid,keyspace[1])
                 return self.db.split(0,mid)
 
-
             elif self.addr in list_b:
+                self.log.debug("I am in group b")
+                self.log.debug(peers)
+                self.log.debug(list_b)
                 self.groups['G0'].peers = OrderedDict()
                 for wss in list_a:
                     self.groups['G0'].peers[self.update_wss(wss)] = self.groups['G1'].peers[wss]
@@ -121,13 +124,13 @@ class StateManager:
                         self.lock = 'normal'
                         return 1
 
-
             else:
                 self.log.info("got bad group request: ignoring")
-    
+
+
     def group_update(self, target_group, opList):
         """ atomic state updates inside lock """
-        # TODO modify for rollbackable
+        
         self.log.info("performing group operations: {}".format(opList))
         try:
             for item in opList.split('<>'): #  keyspace and group membership

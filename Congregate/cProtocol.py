@@ -52,7 +52,12 @@ class CongregateProtocol:
             timer_result = asyncio.wait_for(bpcon_task, 3.0) # timer possibly unneccessary
             commit_result = yield from self.bpcon.request(msg, bpcon_task) # returns boolean
             self.log.info("bpcon request result: {}".format(commit_result))
-            return commit_result
+
+            # repeatedly attempt to commit while failure was due to resync
+            if commit_result['code'] == 2:
+                commit_result = yield from self.bpcon_request(msg)
+
+            return commit_result  # always returns code = 0 or code = 1
 
         except asyncio.TimeoutError:
             self.log.info("bpcon commit timed out")
@@ -60,6 +65,7 @@ class CongregateProtocol:
             self.log.info("bpcon commit future cancelled")
         except Exception as e:
             self.log.debug("bpcon commit misc. error: {}".format(e))
+
 
     ### Interface with other groups ###
 
@@ -80,6 +86,9 @@ class CongregateProtocol:
             # assess suitability (phase vs. state)
             self.log.info("remote P2 request to be committed is {}".format(op))
             # TODO check input lots (is a proper request, hashes to locked value, is a suitable group op)
+
+            requesthash = SHA.new(op.encode()).hexdigest()
+
             p2_success = yield from self.bpcon_request(op)
             response = "P2,ACK"
         else:
@@ -99,7 +108,6 @@ class CongregateProtocol:
         Initiate multigroup update/request and notify neighbors of update
         """
         # 1. acquire lock internal consensus 
-        # TODO first check lock state
         if self.bpcon.state.lock == "locked":
             return "failure: another group operation in progress"
         request = "{},{},".format(request_type, target_group)
@@ -112,9 +120,9 @@ class CongregateProtocol:
             # make 2pc P1 request to remote group
             remote_p1_msg = "P1,{}".format(request_type) 
             self.log.info("sending {}".format(remote_p1_msg))
-            recipients = self.bpcon.state.groups[target_group].get_all()
+            recipients = self.bpcon.state.groups[target_group].get_peers() # TODO maybe not get_all()...
             p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipients)
-            self.log.info("P1 response: {}".format(p1_response)) 
+            self.log.info("P1 response: {}".format(p1_response)) # TODO one response? from whom?
         
             if p1_response.startswith("P1"): # == "P1,ACK":  
             # commit operation locally
@@ -133,13 +141,14 @@ class CongregateProtocol:
                         self.log.info("P2 local commit succeeded. sending P2 request")
                         compressed = self.bpcon.state.get_compressed_state()
                         request = "{};{};{}".format(request_type, target_group, compressed)
-                        remote_p2_msg = "P2,{}".format()
+                        remote_p2_msg = "P2,{}".format(request)
                         p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipients)
                         if p2_response == "P2,ACK":
-                            self.log.info("Congregate 2pc request completed successfully")
+                            self.log.info("Congregate 2PC request completed successfully")
+                            # TODO modify state etc.
 
                 except:
-                    self.log.info("2pc request failed. Local state not changed")
+                    self.log.info("2PC request failed. Local state not changed")
 
             else:
                 self.log.info("non P1 response recieved: {}".format(p1_response))
@@ -147,7 +156,7 @@ class CongregateProtocol:
             self.log.info("Lock not acquired")
             
     def copy_state(self):
-        self.stateCopy = self.state.image_state()
+        self.stateCopy = self.bpcon.state.image_state()
 
     ### Internal regulatory functions ###
 
@@ -174,16 +183,14 @@ class CongregateProtocol:
 
     @asyncio.coroutine
     def handle_join(self, wss, pubkey, cert):
-        """ perform join request from ungrouped peer """
+        """ perform join request for ungrouped peer """
         # TODO test peer creds
-        
+        self.log.info("peer group is: {}".format(self.bpcon.state.groups['G1'].peers))
+        self.log.info("adding peer...")
         # add to local-group routing table
         request = "A,{},{}<>{}".format(wss,pubkey,cert)
         res = yield from self.bpcon_request(request)
-        if res['code'] == 2:
-            res = yield from self.bpcon_request(request) # redo the request once if a resync was performed
-        
-        self.log.debug("join request result: {}".format(res))
+        self.log.info("join request result: {}".format(res))
         
         # TODO notify neighbor groups of membership change
         
@@ -196,18 +203,13 @@ class CongregateProtocol:
 
     @asyncio.coroutine
     def request_split(self):
-        self.log.debug("initiating split request")
+        self.log.info("initiating split request")
         yield from self.bpcon_request("S,,")
 
     @asyncio.coroutine
     def request_merge(self, targetGroup):
-        self.log.debug("initiating merge request")
+        self.log.info("initiating merge request")
         yield from self.make_2pc_request("M", targetGroup)
-
-    
-
-
-
 
 
     def create_request(self, request_type, args=None):
