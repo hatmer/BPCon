@@ -39,13 +39,14 @@ class StateManager:
         if not ',' in val:
             # requires unpackaging
             try:
-                length, data = val.split('<>')
+                length, data = val.split('<>', 1) 
                 val = int(data).to_bytes(int(length), byteorder='little').decode()
             except:
                 self.log.critical("bad update value received. no changes to state")
                 return
 
-        t,k,v = val.split(',')
+        t,k,v = val.split(',', 2)
+        self.log.debug("optype: {}, key: {}, value: {}".format(t, k,v))
         
         #DB requests
         if t == 'P':
@@ -103,11 +104,13 @@ class StateManager:
                     self.timer = time.time()
                     self.log.debug("lock acquired. Locked hashvalue: {}".format(v))
 
-            elif k == "commit" and self.state == 'locked': #op is prepped(locked) group op
+            elif k == "commit" and self.lock == 'locked': #op is prepped(locked) group op
                     # verify group op
-                    vhash = SHA.new(val.encode()).hexdigest()
+                    optype, group, b64_files = v.split(';', 2)
+                    optype_and_group = optype + "," + group + ","
+                    vhash = SHA.new(optype_and_group.encode()).hexdigest()
                     if vhash != self.group_p1_hashval:
-                        self.log.info("locked state, rejecting invalid commit value")
+                        self.log.info("locked state, rejecting invalid commit value: {}".format(val))
                         return
 
                     # make a backup copy of current state
@@ -128,22 +131,30 @@ class StateManager:
                 self.log.info("got bad group request: ignoring")
 
 
-    def group_update(self, target_group, opList):
+    def group_update(self, group, opList):
         """ atomic state updates inside lock """
         
         self.log.info("performing group operations: {}".format(opList))
         try:
-            for item in opList.split('<>'): #  keyspace and group membership
+            for item in opList.split('<>'): #  keyspace and group membership #TODO <> in data can break this? remove mult-op suppport?
                 
-                opType, group, data = item.split(';') 
+                #opType, group, data = item.split(';')
+                opType, group, data = item.split(';', 2)
                 
-                if g not in ['G0', 'G1', 'G2']:
-                    raise ValueError("key is not a valid group")
+                if group not in ['G0','G2']:
+                    raise ValueError("not a valid group")
                 
-                if t == 'M': # Merge
-                    pubkey = self.groups[g].peers[a]
+                # reverse groups since views are mirror images
+                tg = 'G0' 
+                if group == 'G0':
+                    tg = 'G2'
+
+                if opType == 'M': # Merge
+                    self.log.debug("merging!!!")
+
+                    pubkey = self.groups[tg].peers[a]
                     self.groups[b].peers[a] = pubkey
-                    self.groups[g].remove_peer(a)
+                    self.groups[tg].remove_peer(a)
                 
                 #elif t == 'K':
                 #    self.groups[g].keyspace = (float(a),float(b))
@@ -155,8 +166,11 @@ class StateManager:
             self.log.info("got bad value in group update: {}".format(e))
 
     def get_compressed_state(self):
-        toStore = pickle.dumps([self.groups, self.db])
-        return zlib.compress(toStore)
+        self.log.debug("compressing state...")
+        toStore = pickle.dumps([self.groups['G0'].get_peers(), self.groups['G1'].get_peers(),
+                                self.groups['G2'].get_peers(), self.db])
+        compressed = zlib.compress(toStore)
+        return compressed
 
     def image_state(self):
         # create disc copy of system state 

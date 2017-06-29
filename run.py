@@ -79,9 +79,9 @@ class Congregate:
                 log.info("testing split...")
                 self.local_request("S,,")
 
-                #log.info("testing merge...")
+                log.info("testing merge...")
                 #self.c.request_merge("G2")
-                #self.group_request("M", "G2")
+                self.group_request("M", "G0")
 
         except Exception as e:
             log.info(e)

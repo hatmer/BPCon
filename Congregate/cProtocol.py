@@ -17,6 +17,8 @@ from Crypto.Hash import SHA
 from BPCon.routing import GroupManager
 from Congregate.algorithms import Autobot
 from BPCon.utils import encode_for_transport, decode_to_bytes
+from random import randint
+
 
 class CongregateProtocol:
     def __init__(self, loop, conf, bpcon):
@@ -69,19 +71,50 @@ class CongregateProtocol:
 
     ### Interface with other groups ###
 
+    def sanity_check(self, op, value):
+        """ security check on 2pc inputs from other group """
+        if len(op) > 1:
+            self.log.critical("refusing 2pc request. op too long: {}".format(op))
+            return False
+
+        if op == 'M':
+            # value is group to merge with
+            if value == 'G0' or value == 'G2':
+                size_of_other_group = len(self.bpcon.state.groups[value].get_peers())
+                size_of_my_group = len(self.bpcon.state.groups['G1'].get_peers())
+
+                if (size_of_other_group + size_of_my_group) <= self.conf['MAX_GROUP_SIZE']:
+                    return True
+
+            return False
+
+        # sanity check other types of group ops here
+
     @asyncio.coroutine
     def handle_2pc_request(self, request):
         """
         Process 2pc request initiated by another group
         """
-        phase = request[:2]
-        op = request[3:]
+        if len(request) != 7:
+            self.log.critical("refusing 2pc request. Invalid length of request: {} -> {}".format(request, len(request)))
+            return
+            
+        phase, op, group = request.split(",")
         if phase == "P1": 
-            self.log.info("remote P1 requesthash is {}".format(op))
-            # TODO calculate independent requesthash, check if is appropriate
-            local_p1_msg = "G,{},{}".format("lock", op)
+
+            if not self.sanity_check(op, group):
+                self.log.critical("refusing 2pc request: sanity check on input fails")
+                return
+
+            self.log.info("remote P1 requested op is {}".format(op))
+            local_request = "{},{},".format(op, group)
+            requesthash = SHA.new(local_request.encode()).hexdigest()
+
+
+            local_p1_msg = "G,{},{}".format("lock", requesthash)
             lock_acquired = yield from self.bpcon_request(local_p1_msg) # acquire group lock
-            response = "P1,ACK"
+            response = "P1ACK,{}".format(self.bpcon.state.get_compressed_state())
+
         elif phase == "P2": # is P2 
             # assess suitability (phase vs. state)
             self.log.info("remote P2 request to be committed is {}".format(op))
@@ -90,7 +123,7 @@ class CongregateProtocol:
             requesthash = SHA.new(op.encode()).hexdigest()
 
             p2_success = yield from self.bpcon_request(op)
-            response = "P2,ACK"
+            response = "P2ACK"
         else:
             self.log.error("peer sent bad 2pc request")
 
@@ -106,33 +139,56 @@ class CongregateProtocol:
     def make_2pc_request(self, request_type, target_group):
         """
         Initiate multigroup update/request and notify neighbors of update
-        """
-        # 1. acquire lock internal consensus 
+        """ 
         if self.bpcon.state.lock == "locked":
-            return "failure: another group operation in progress"
+            self.log.debug("2pc failure: another group operation in progress")
+            return
+
+        # get members of target group
+        group_members = self.bpcon.state.groups[target_group].get_peers()
+        if len(group_members) == 0:
+            self.log.error("initiated 2pc request with empty group {}".format(target_group))
+            return
+
+        # acquire lock internal consensus
         request = "{},{},".format(request_type, target_group)
         requesthash = SHA.new(request.encode()).hexdigest()
+        self.log.debug("{} -> {}".format(request, requesthash))
+
         local_p1_msg = "G,{},{}".format("lock", requesthash)
         lock_acquired = yield from self.bpcon_request(local_p1_msg) # request lock from local group
         self.log.debug("bpcon lock acquired: {}".format(lock_acquired))
         
         if lock_acquired: 
             # make 2pc P1 request to remote group
-            remote_p1_msg = "P1,{}".format(request_type) 
-            self.log.info("sending {}".format(remote_p1_msg))
-            recipients = self.bpcon.state.groups[target_group].get_peers() # TODO maybe not get_all()...
-            p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipients)
-            self.log.info("P1 response: {}".format(p1_response)) # TODO one response? from whom?
+            remote_p1_msg = "P1,{},{}".format(request_type,target_group) 
+            
+            recipient = [group_members[randint(0,len(group_members)-1)]]# random member of group_members
+            self.log.info("sending {} to {}".format(remote_p1_msg, recipient))
+            p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipient) #TODO break out send_msg
+            self.log.info("P1 response: {}".format(p1_response))
         
-            if p1_response.startswith("P1"): # == "P1,ACK":  
-            # commit operation locally
+            if p1_response == None:
+                # quit because other group did not respond
+                # TODO will it return None if the other group says no? other cases?
+                self.log.debug("2pc failure because other group response is None")
+                return
+
+            if p1_response.startswith("P1ACK"):   
+                # commit operation locally
                 try:
-                    header, b64_files = p1_response.split(',')
-                    # extract pickled and compressed state data from other group
-                    #g1, g2, g3, db = zlib.decompress(decode_to_bytes(b64_files))
+                    b64_files = ""
+                    if len(p1_response) > 3:
+                        b64_files = p1_response[3:]
+                        # extract pickled and compressed state data from other group
+                        #[g0, g1, g2, db] = zlib.decompress(pickle.loads(b64_files))
+                        # sanity check groups and db keyspace values
 
                     # make a backup copy of current state
                     stateCopy = self.bpcon.state
+
+                    # local commit
+                    self.log.debug("initiating local commit 2pc response")
                     opList  = "{};{};{}".format(request_type, target_group, b64_files)
                     request = "G,commit,{}".format(opList)
                     p2_success = yield from self.bpcon_request(request) # local_p2_msg
@@ -143,28 +199,38 @@ class CongregateProtocol:
                         request = "{};{};{}".format(request_type, target_group, compressed)
                         remote_p2_msg = "P2,{}".format(request)
                         p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipients)
-                        if p2_response == "P2,ACK":
+                        if p2_response == "P2ACK":
                             self.log.info("Congregate 2PC request completed successfully")
-                            # TODO modify state etc.
-
+                            try:
+                                # TODO modify state etc.
+                                pass
+                            except:
+                                self.log.error("state modification failed")
+                        else:
+                            self.log.info("2PC request failed. p2 response not received. Local state not changed")
+                    else:
+                        self.log.info("2PC request failed. Local commit failed. Local state not changed")
                 except:
-                    self.log.info("2PC request failed. Local state not changed")
-
+                    self.log.info("2PC request failed. p1 response handling failed. Local state not changed")
             else:
                 self.log.info("non P1 response recieved: {}".format(p1_response))
         else:
-            self.log.info("Lock not acquired")
+            self.log.info("could not acquire lock")
             
     def copy_state(self):
         self.stateCopy = self.bpcon.state.image_state()
 
     ### Internal regulatory functions ###
 
+    #@asyncio.coroutine
+    #def smart_recv(self, sock):
+        
+
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         try:
             input_msg = yield from websocket.recv()
-            self.log.info("< {}".format(input_msg))
+            self.log.info("received {} from {}".format(input_msg, websocket.remote_address))
             output_msg = yield from self.handle_2pc_request(input_msg)
             
             if output_msg:

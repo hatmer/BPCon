@@ -48,7 +48,7 @@ class GroupManager(object):
 
     def add_peer(self, sock_str, creds):
         try:
-            key,cert = creds.split('<>')
+            key,cert = creds.split('<>', 1)
             #sock_str = "wss://"+str(ip)+":"+str(port)
             ID = get_ID(sock_str)
             if not sock_str in self.peers.keys():
@@ -76,10 +76,9 @@ class GroupManager(object):
             return False
 
     def get_peers(self):
-        # returns list of addresses of peers in group
+        # returns list of addresses of all members of this group
         sockets = list(self.peers.keys())
         self.conf['log'].debug("peers: {}".format(sockets))
-        sockets.remove(self.conf['p_wss']) # don't want to send to self
         return sockets
 
         
@@ -87,7 +86,7 @@ class GroupManager(object):
         num_verified = 0
         
         for item in msglist:
-            wss, msg, sig = item.split(';')
+            wss, msg, sig = item.split(';', 2)
             if wss in self.peers:
                 
                 rsakey = self.peers[wss]

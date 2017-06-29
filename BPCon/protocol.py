@@ -33,6 +33,7 @@ class BPConProtocol:
         conf  -- dictionary with configuration variables
         state -- class object with update() function
         """
+        self.ws = conf['p_wss']
         self.logger = conf['log']
         self.maxBal = -1
         self.maxVBal = -1       # highest ballot voted in
@@ -85,6 +86,7 @@ class BPConProtocol:
         self.pending = future
         self.maxBal = self.maxVBal + 1
         recipients = self.peers.get_peers()
+        recipients.remove(self.ws) # don't want to send to self
         self.logger.debug("local group recipients: {}".format(recipients))
 
         if not len(recipients): # no localgroup peers
@@ -228,7 +230,7 @@ class BPConProtocol:
     def handle_msg(self, msg, peer_wss=None):    
         msg_type = msg[:2]
         if msg_type == "1c":
-            msg,proofs = msg.split('&;')
+            msg,proofs = msg.split('&;',1)
         parts = self.preprocess_msg(msg)
         num_parts = len(parts)
         timestamp = parts[1]
@@ -245,7 +247,7 @@ class BPConProtocol:
             # implies is leader for ballot, has quorum object
             self.logger.debug("got 1b!!!")
             [mb,mv,avsSig] = parts[3:6]
-            avs, sig = avsSig.split(';')
+            avs, sig = avsSig.split(';', 1)
             
             if N == self.Q.N:
                 self.Q.add_1b(int(mb), msg, peer_wss)

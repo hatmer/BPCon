@@ -36,6 +36,7 @@ def decode_to_bytes(val):
     #return int(val).to_bytes(256, byteorder='little')
     return base64.b64decode(val)
 
+
 def get_hash_index(key):
     """ returns number between 0 and 1 """
     h = hashlib.sha256(key)
