@@ -2,6 +2,7 @@ from BPCon.routing import GroupManager
 from BPCon.storage import InMemoryStorage
 from Crypto.Hash import SHA
 from collections import OrderedDict
+from BPCon.utils import decode_to_bytes
 import pickle
 import time
 import zlib
@@ -35,7 +36,7 @@ class StateManager:
         return wss[:-1]+"1"
 
     def update(self, ballot_num=-1, val=None):
-        self.log.debug("updating state: ballot #{}, op: {}".format(ballot_num, val))
+        self.log.info("updating state: ballot #{}, op: {}".format(ballot_num, val))
         if not ',' in val:
             # requires unpackaging
             try:
@@ -104,19 +105,20 @@ class StateManager:
                     self.timer = time.time()
                     self.log.debug("lock acquired. Locked hashvalue: {}".format(v))
 
+
             elif k == "commit" and self.lock == 'locked': #op is prepped(locked) group op
                     # verify group op
                     optype, group, b64_files = v.split(';', 2)
                     optype_and_group = optype + "," + group + ","
                     vhash = SHA.new(optype_and_group.encode()).hexdigest()
                     if vhash != self.group_p1_hashval:
-                        self.log.info("locked state, rejecting invalid commit value: {}".format(val))
+                        self.log.critical("locked state, rejecting invalid commit value: {}".format(val))
                         return
 
                     # make a backup copy of current state
                     self.image_state()
                     
-                    # update and ensure rollback in case of update failure
+                    # update and ensure rollback in case of update failure #TODO do this in protocol instead?
                     try:
                         self.group_update(k,v)
                         self.lock = 'normal'
@@ -134,41 +136,82 @@ class StateManager:
     def group_update(self, group, opList):
         """ atomic state updates inside lock """
         
-        self.log.info("performing group operations: {}".format(opList))
+        self.log.debug("performing group operations: {}".format(opList))
         try:
-            for item in opList.split('<>'): #  keyspace and group membership #TODO <> in data can break this? remove mult-op suppport?
+            opType, group, data = opList.split(';', 2)
                 
-                #opType, group, data = item.split(';')
-                opType, group, data = item.split(';', 2)
+            if group not in ['G0','G2']:
+                raise ValueError("not a valid group")
                 
-                if group not in ['G0','G2']:
-                    raise ValueError("not a valid group")
+            if opType == 'M': # Merge
+                self.log.debug("merging!!!")
                 
+                [g0, g1, g2, db, ks0, ks1, ks2] = pickle.loads(zlib.decompress(decode_to_bytes(data)))
+                
+                merge_group = 'G0'
+                new_edge_group = g0
+                new_edge_keyspace = ks0
+                #new_local_keyspace = (ks1[0], self.groups['G1'].keyspace[0], ks1[1])
+                new_local_keyspace = (ks1[0], self.groups['G1'].keyspace[1])
+
                 # reverse groups since views are mirror images
-                tg = 'G0' 
-                if group == 'G0':
-                    tg = 'G2'
+                if group == 'G2':
+                    merge_group = 'G2'
+                    new_edge_group = g2
+                    new_edge_keyspace = ks2
+                    new_local_keyspace = (self.groups['G1'].keyspace[0], ks1[1])
+                    
+                #print(self.groups['G1'].keyspace)
+                #print(ks1)
+                #new_local_keyspace = (ks1[0], self.groups['G1'].keyspace[1])
 
-                if opType == 'M': # Merge
-                    self.log.debug("merging!!!")
+                self.log.info("merging with {}!".format(group))
+                # verify keyspaces
+                if not ((ks1[1] - self.groups['G1'].keyspace[0] == 0.0) or (ks1[0] - self.groups['G1'].keyspace[1] == 0.0)):
+                    self.log.critical("attempted merge with non-consecutive group")
+                    return
 
-                    pubkey = self.groups[tg].peers[a]
-                    self.groups[b].peers[a] = pubkey
-                    self.groups[tg].remove_peer(a)
+                # verify each pubkey in collapsed groups 
+                # create new (universal) view 
+                # update keyspace
                 
-                #elif t == 'K':
-                #    self.groups[g].keyspace = (float(a),float(b))
+                # add G1' to G1
+                for peer in g1.items():
+                    self.log.info("adding {} to G1".format(peer[0]))
+                    key = peer[1][0].exportKey('PEM').decode('utf-8')
+                    self.groups['G1'].add_peer(peer[0], key + "<><><>" + peer[1][1])
+                                       
+                # set new_edge_group 
+                for wss in self.groups[merge_group].get_peers():
+                    self.log.info("removing {} from {}".format(wss, merge_group))
+                    self.groups[merge_group].remove_peer(wss)
+                for peer in new_edge_group.items():
+                    self.log.info("adding {} to {}".format(peer[0], merge_group))
+                    key = peer[1][0].exportKey('PEM').decode('utf-8')
+                    self.groups[merge_group].add_peer(peer[0], key + "<><><>" + peer[1][1])
+
+                print(ks0, ks1, ks2)
+
+                self.groups[merge_group].keyspace = new_edge_keyspace
+                self.groups['G1'].keyspace = new_local_keyspace
+                self.db.merge(db)                
+
                 
-                else:
-                    self.log.info("unrecognized group op: {}".format(item))
+            #elif t == 'K':
+            #    self.groups[g].keyspace = (float(a),float(b))
+                
+            else:
+                self.log.info("unrecognized group op: {}".format(item))
 
         except Exception as e:
             self.log.info("got bad value in group update: {}".format(e))
 
     def get_compressed_state(self):
         self.log.debug("compressing state...")
-        toStore = pickle.dumps([self.groups['G0'].get_peers(), self.groups['G1'].get_peers(),
-                                self.groups['G2'].get_peers(), self.db])
+        toStore = pickle.dumps([self.groups['G0'].peers, self.groups['G1'].peers,
+                                self.groups['G2'].peers, self.db.kvstore, 
+                                self.groups['G0'].keyspace, self.groups['G1'].keyspace,
+                                self.groups['G2'].keyspace])
         compressed = zlib.compress(toStore)
         return compressed
 

@@ -95,34 +95,50 @@ class CongregateProtocol:
         """
         Process 2pc request initiated by another group
         """
-        if len(request) != 7:
-            self.log.critical("refusing 2pc request. Invalid length of request: {} -> {}".format(request, len(request)))
-            return
-            
-        phase, op, group = request.split(",")
+        #if len(request) != 7:
+            #self.log.critical("refusing 2pc request. Invalid length of request: {} -> {}".format(request, len(request)))
+            #return
+        self.log.info("handling 2pc request: {}".format(request))    
+        phase, op = request.split(",", 1)
+
+        lock_acquired = self.bpcon.state.lock == "locked"
+
         if phase == "P1": 
 
-            if not self.sanity_check(op, group):
+            action, group = op.split(",", 1)
+
+            newgroup = "G2" if (group == 'G0') else "G0"
+
+            if not self.sanity_check(action, newgroup):
                 self.log.critical("refusing 2pc request: sanity check on input fails")
                 return
 
-            self.log.info("remote P1 requested op is {}".format(op))
-            local_request = "{},{},".format(op, group)
+            self.log.info("remote P1 requested op is {}".format(action))
+            local_request = "{},{},".format(action, newgroup)
             requesthash = SHA.new(local_request.encode()).hexdigest()
-
 
             local_p1_msg = "G,{},{}".format("lock", requesthash)
             lock_acquired = yield from self.bpcon_request(local_p1_msg) # acquire group lock
-            response = "P1ACK,{}".format(self.bpcon.state.get_compressed_state())
+            data = encode_for_transport(self.bpcon.state.get_compressed_state())
+            response = "P1ACK,{}".format(data)
 
         elif phase == "P2": # is P2 
+            action, group, b64_files = op.split(";", 2)
+
+            # switch to mirror view
+            newgroup = "G2" if (group == 'G0') else "G0"
+            newop = action+";"+newgroup+";"+b64_files # TODO improve
+
             # assess suitability (phase vs. state)
-            self.log.info("remote P2 request to be committed is {}".format(op))
+            self.log.info("remote P2 request to be committed is {}".format(newop))
             # TODO check input lots (is a proper request, hashes to locked value, is a suitable group op)
 
-            requesthash = SHA.new(op.encode()).hexdigest()
+            requesthash = SHA.new((action+";"+group+";").encode()).hexdigest()
+            # TODO check hash here instead?
 
-            p2_success = yield from self.bpcon_request(op)
+            local_p2_msg = "G,commit,{}".format(newop)
+
+            p2_success = yield from self.bpcon_request(local_p2_msg)
             response = "P2ACK"
         else:
             self.log.error("peer sent bad 2pc request")
@@ -164,9 +180,9 @@ class CongregateProtocol:
             remote_p1_msg = "P1,{},{}".format(request_type,target_group) 
             
             recipient = [group_members[randint(0,len(group_members)-1)]]# random member of group_members
-            self.log.info("sending {} to {}".format(remote_p1_msg, recipient))
+            self.log.debug("sending {} to {}".format(remote_p1_msg, recipient))
             p1_response = yield from self.bpcon.send_msg(remote_p1_msg, recipient) #TODO break out send_msg
-            self.log.info("P1 response: {}".format(p1_response))
+            self.log.debug("P1 response: {}".format(p1_response))
         
             if p1_response == None:
                 # quit because other group did not respond
@@ -174,12 +190,13 @@ class CongregateProtocol:
                 self.log.debug("2pc failure because other group response is None")
                 return
 
+            self.log.debug("P1 response is: {}".format(p1_response))
             if p1_response.startswith("P1ACK"):   
                 # commit operation locally
                 try:
                     b64_files = ""
                     if len(p1_response) > 3:
-                        b64_files = p1_response[3:]
+                        b64_files = p1_response[6:]
                         # extract pickled and compressed state data from other group
                         #[g0, g1, g2, db] = zlib.decompress(pickle.loads(b64_files))
                         # sanity check groups and db keyspace values
@@ -189,16 +206,22 @@ class CongregateProtocol:
 
                     # local commit
                     self.log.debug("initiating local commit 2pc response")
-                    opList  = "{};{};{}".format(request_type, target_group, b64_files)
-                    request = "G,commit,{}".format(opList)
+                    opList  = "{};{};".format(request_type, target_group)
+                    request = "G,commit,{}".format(opList) + b64_files
+
+                    compressed = encode_for_transport(self.bpcon.state.get_compressed_state())
+
                     p2_success = yield from self.bpcon_request(request) # local_p2_msg
                 
                     if p2_success: 
                         self.log.info("P2 local commit succeeded. sending P2 request")
-                        compressed = self.bpcon.state.get_compressed_state()
+                        #compressed = encode_for_transport(self.bpcon.state.get_compressed_state())
+                        self.log.info("compressed state is {}".format(compressed))
+                        
                         request = "{};{};{}".format(request_type, target_group, compressed)
                         remote_p2_msg = "P2,{}".format(request)
-                        p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipients)
+                        p2_response = yield from self.bpcon.send_msg(remote_p2_msg, recipient)
+                        
                         if p2_response == "P2ACK":
                             self.log.info("Congregate 2PC request completed successfully")
                             try:
@@ -210,8 +233,8 @@ class CongregateProtocol:
                             self.log.info("2PC request failed. p2 response not received. Local state not changed")
                     else:
                         self.log.info("2PC request failed. Local commit failed. Local state not changed")
-                except:
-                    self.log.info("2PC request failed. p1 response handling failed. Local state not changed")
+                except Exception as e:
+                    self.log.info("2PC request failed: {} Local state not changed".format(e))
             else:
                 self.log.info("non P1 response recieved: {}".format(p1_response))
         else:
@@ -230,11 +253,12 @@ class CongregateProtocol:
     def main_loop(self, websocket, path):
         try:
             input_msg = yield from websocket.recv()
-            self.log.info("received {} from {}".format(input_msg, websocket.remote_address))
+            self.log.info("# bytes recieved: {}".format(len(input_msg)))
+            self.log.debug("received {} from {}".format(input_msg, websocket.remote_address))
             output_msg = yield from self.handle_2pc_request(input_msg)
             
             if output_msg:
-                self.log.info("> {}".format(output_msg))
+                self.log.debug("> {}".format(output_msg))
                 yield from websocket.send(output_msg) # ACKs for P1 and P2
                 #self.bmsgs.append(output_msg)
                 
@@ -254,7 +278,10 @@ class CongregateProtocol:
         self.log.info("peer group is: {}".format(self.bpcon.state.groups['G1'].peers))
         self.log.info("adding peer...")
         # add to local-group routing table
-        request = "A,{},{}<>{}".format(wss,pubkey,cert)
+        if "<><><>" in pubkey:
+            self.log.critical("intrusion attempt, bad pubkey input!!! Aborting...")
+            return
+        request = "A,{},{}<><><>{}".format(wss,pubkey,cert)
         res = yield from self.bpcon_request(request)
         self.log.info("join request result: {}".format(res))
         

@@ -295,6 +295,7 @@ class BPConProtocol:
         returns list of latencies
         """
         self.logger.debug("sending to recipients: {}".format(recipient_list))
+        self.logger.info("# bytes to send: {}".format(len(to_send)))
         good_peers = 0
         peer_latencies = {}
         input_msg = None
@@ -308,6 +309,7 @@ class BPConProtocol:
                 yield from client_socket.send(to_send)
                
                 input_msg = yield from client_socket.recv()
+
                 peer_latencies[ws] = time.time() - send_start
                 self.logger.debug("input_msg: {}".format(input_msg))
                 if handler_function:

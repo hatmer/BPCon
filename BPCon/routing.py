@@ -17,7 +17,7 @@ class GroupManager(object):
     def __init__(self, conf):
         self.conf = conf
         self.keyspace = (0.0,0.0)
-        self.peers = {} #OrderedDict() # group members
+        self.peers = {} # group members
         self.num_peers = 0
 
     def init_local_group(self):    
@@ -28,7 +28,7 @@ class GroupManager(object):
             key = fh.read()
         with open(self.conf['certfile'], 'r') as fh:
             cert = fh.read()
-        self.add_peer(self.conf['p_wss'], key + "<>" + cert)
+        self.add_peer(self.conf['p_wss'], key + "<><><>" + cert)
 
         # add peers from config
         for wss in self.conf['peerlist']:
@@ -36,7 +36,7 @@ class GroupManager(object):
             if os.path.isfile(fname):
                 #read key and add pair to self.peers
                 with open(fname, 'r') as fh:
-                    self.peers[wss] = RSA.importKey(fh.read()) 
+                    self.peers[wss] = (RSA.importKey(fh.read()), cert) 
                     self.conf['log'].info("added {} to peers".format(wss))
             else:
                 self.conf['log'].info("missing key file for {}".format(wss))
@@ -46,15 +46,17 @@ class GroupManager(object):
     def quorum_size(self):
         return int((self.num_peers / 2) + (self.num_peers % 2))
 
-    def add_peer(self, sock_str, creds):
+    def add_peer(self, sock_str, creds, cert=None, isMerge=False):
         try:
-            key,cert = creds.split('<>', 1)
+            key,cert = creds.split('<><><>', 1)
+
             #sock_str = "wss://"+str(ip)+":"+str(port)
             ID = get_ID(sock_str)
             if not sock_str in self.peers.keys():
                 key = str(key)
-                self.peers[sock_str] = RSA.importKey(key) 
+                self.peers[sock_str] = (RSA.importKey(key), cert)
                 self.conf['log'].debug("add peer: key imported")
+
                 # write key to file
                 with open(self.conf['peer_keys']+ID+".pub", 'w') as fh:
                     fh.write(key)
@@ -62,6 +64,7 @@ class GroupManager(object):
                     fh.write(cert)
                 self.num_peers += 1
                 return True
+
         except Exception as e:
             self.conf['log'].debug(e)
         return False    
@@ -70,6 +73,7 @@ class GroupManager(object):
         if self.peers[wss]:
             self.peers.pop(wss, None)
             self.num_peers -= 1
+            # TODO delete pubkey and cert
             return True
         else:
             self.conf['log'].debug("remove failed")
@@ -89,7 +93,7 @@ class GroupManager(object):
             wss, msg, sig = item.split(';', 2)
             if wss in self.peers:
                 
-                rsakey = self.peers[wss]
+                rsakey = self.peers[wss][0]
                 h = SHA.new(msg.encode())
 
                 #sigmsg = int(sig).to_bytes(256, byteorder='little')

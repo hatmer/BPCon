@@ -14,6 +14,7 @@ class InMemoryStorage(object):
     
     def put(self, k, v):
         self.kvstore[k] = v
+        print(type(self.kvstore))
         return 0
 
     def delete(self,k):
@@ -32,13 +33,21 @@ class InMemoryStorage(object):
                 break
 
         if section: # section is either 0 or 1
-            self.kvstore = self.kvstore.items()[midKey:]
+            self.kvstore = SortedDict(self.kvstore.items()[midKey:])
 
         else:
-            self.kvstore = self.kvstore.items()[:midKey]
+            self.kvstore = SortedDict(self.kvstore.items()[:midKey])
         print("split complete. kvstore is now:")
         print(self.kvstore)
         return 0
+
+    def merge(self, other):
+        print(type(self.kvstore))
+        print(self.kvstore)
+        print(type(other))
+        for item in other:
+            print(item)
+        self.kvstore.update(other)
 
     def save(self): # need metadata here
         save_state('data/backup/db_copy.pkl', self.kvstore)
