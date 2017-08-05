@@ -14,7 +14,6 @@ class InMemoryStorage(object):
     
     def put(self, k, v):
         self.kvstore[k] = v
-        print(type(self.kvstore))
         return 0
 
     def delete(self,k):
@@ -38,15 +37,9 @@ class InMemoryStorage(object):
         else:
             self.kvstore = SortedDict(self.kvstore.items()[:midKey])
         print("split complete. kvstore is now:")
-        print(self.kvstore)
         return 0
 
     def merge(self, other):
-        print(type(self.kvstore))
-        print(self.kvstore)
-        print(type(other))
-        for item in other:
-            print(item)
         self.kvstore.update(other)
 
     def save(self): # need metadata here

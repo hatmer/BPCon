@@ -19,7 +19,7 @@ class StateManager:
         self.groups['G1'] = GroupManager(conf) # overwritten by BPCon local group
         self.groups['G2'] = GroupManager(conf)
         self.group_p1_hashval = None 
-        self.lock = 'normal'     # normal, locked,  managing1, managing2, awaiting
+        self.lock = 'normal'     # normal, locked
         self.timer = 0.0
         
         # BPCon
@@ -67,7 +67,7 @@ class StateManager:
             keyspace = self.groups['G1'].keyspace
             diff = (keyspace[1] - keyspace[0]) / 2
             mid = keyspace[0] + diff
-            
+
             if self.addr in list_a:
                 self.log.debug("I am in group a")
                 self.groups['G2'].peers = OrderedDict()
@@ -104,7 +104,6 @@ class StateManager:
                     self.lock = 'locked'
                     self.timer = time.time()
                     self.log.debug("lock acquired. Locked hashvalue: {}".format(v))
-
 
             elif k == "commit" and self.lock == 'locked': #op is prepped(locked) group op
                     # verify group op
@@ -151,7 +150,6 @@ class StateManager:
                 merge_group = 'G0'
                 new_edge_group = g0
                 new_edge_keyspace = ks0
-                #new_local_keyspace = (ks1[0], self.groups['G1'].keyspace[0], ks1[1])
                 new_local_keyspace = (ks1[0], self.groups['G1'].keyspace[1])
 
                 # reverse groups since views are mirror images
@@ -161,11 +159,8 @@ class StateManager:
                     new_edge_keyspace = ks2
                     new_local_keyspace = (self.groups['G1'].keyspace[0], ks1[1])
                     
-                #print(self.groups['G1'].keyspace)
-                #print(ks1)
-                #new_local_keyspace = (ks1[0], self.groups['G1'].keyspace[1])
-
                 self.log.info("merging with {}!".format(group))
+                
                 # verify keyspaces
                 if not ((ks1[1] - self.groups['G1'].keyspace[0] == 0.0) or (ks1[0] - self.groups['G1'].keyspace[1] == 0.0)):
                     self.log.critical("attempted merge with non-consecutive group")
@@ -190,13 +185,12 @@ class StateManager:
                     key = peer[1][0].exportKey('PEM').decode('utf-8')
                     self.groups[merge_group].add_peer(peer[0], key + "<><><>" + peer[1][1])
 
-                print(ks0, ks1, ks2)
-
                 self.groups[merge_group].keyspace = new_edge_keyspace
                 self.groups['G1'].keyspace = new_local_keyspace
+
+                self.log.info("merging database...")
                 self.db.merge(db)                
 
-                
             #elif t == 'K':
             #    self.groups[g].keyspace = (float(a),float(b))
                 

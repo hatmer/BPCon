@@ -295,7 +295,7 @@ class BPConProtocol:
         returns list of latencies
         """
         self.logger.debug("sending to recipients: {}".format(recipient_list))
-        self.logger.info("# bytes to send: {}".format(len(to_send)))
+        self.logger.debug("# bytes to send: {}".format(len(to_send)))
         good_peers = 0
         peer_latencies = {}
         input_msg = None
@@ -303,7 +303,7 @@ class BPConProtocol:
             send_start = time.time()
             try:
                 self.logger.debug("sending {} to {}".format(to_send, ws))
-                self.logger.info("sending 1a...")
+                self.logger.debug("sending 1a...")
                 client_socket = yield from websockets.connect(ws, ssl=self.ctx)
                 self.logger.debug("to_send: {}".format(to_send))
                 yield from client_socket.send(to_send)
