@@ -36,7 +36,7 @@ class StateManager:
         return wss[:-1]+"1"
 
     def update(self, ballot_num=-1, val=None):
-        self.log.info("updating state: ballot #{}, op: {}".format(ballot_num, val))
+        self.log.debug("updating state: ballot #{}, op: {}".format(ballot_num, val))
         if not ',' in val:
             # requires unpackaging
             try:

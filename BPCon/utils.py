@@ -3,6 +3,7 @@ import subprocess
 import pickle 
 import hashlib
 import base64
+from struct import unpack
 
 def get_ID(sock_str):
     encoded =  hashlib.sha1(sock_str.encode())
@@ -39,7 +40,7 @@ def decode_to_bytes(val):
 
 def get_hash_index(key):
     """ returns number between 0 and 1 """
-    h = hashlib.sha256(key)
-    n = int(h.hexdigest(),base=16)
-    return '%f' % (float(1)/n) # string representation of decimal
-    
+    #h = hashlib.sha256(str(key))
+    #n = int(h.hexdigest(),base=16)
+    #return '%.256f' % (float(1)/n) # string representation of decimal
+    return float(unpack('L', hashlib.sha256(str(key)).digest()[:8])[0]) / 2**64

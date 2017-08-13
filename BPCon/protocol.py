@@ -148,7 +148,7 @@ class BPConProtocol:
 
         if not self.pending.done():
             self.pending.set_result(res)
-        self.logger.info("bpcon request finished")    
+        self.logger.debug("bpcon request finished")    
         return res 
         
     def phase1b(self, N):

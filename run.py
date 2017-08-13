@@ -20,10 +20,7 @@ from Congregate.configManager import ConfigManager, log
 from BPCon.utils import shell, get_ID
 from time import sleep
 
-if len(sys.argv) == 2:
-    configFile = sys.argv[1]
-else:
-    configFile = "data/config.ini"
+configFile = "data/config.ini"
 
 class Congregate:
     def __init__(self):
@@ -53,7 +50,8 @@ class Congregate:
 
             # Add self to local group
             log.debug("adding self to local group")
-            self.join_request()
+            self.last_config_version = 0
+            self.congregate()
             
 
             # Testing 
@@ -63,43 +61,40 @@ class Congregate:
                 sleep(1) # waiting for peer to join
                 for x in range(1):
                     # emulate a running system by populating kvstore and increasing ballot #
-                    request = "P,{},hello{}".format(x,x)
-                    self.local_request("P,test,value")
-                    self.local_request("P,test1,value1")
-                    self.local_request("P,test2,value2")
-                    self.local_request("P,test,value3")
-                    self.local_request("D,test2,")
-                    self.local_request(request)
+                    self.put("000", "value000")                    
+                    self.put(111, "value111")
+                    self.put(222, "value222")
+                    self.delete("000")
                 log.info("requests complete")     
                 log.info("cloning state")
                 self.clone()
-                #log.info("doing nothing...")
+            
             else:
-                #self.c.request_split()
                 log.info("testing split...")
-                self.local_request("S,,")
+                self.split()
+                #self.local_request("S,,")
 
                 log.info("testing merge...")
-                #self.c.request_merge("G2")
-                self.group_request("M", "G0")
+                self.merge("G0")
 
         except Exception as e:
             log.info(e)
 
-    ### State operations ###
-
     def startup(self):
         """
         startup routine
-        Loads from cloned state
+        requests and loads from cloned state
         """
-        # clean working dir and extract config, creds, and state
+        # clean working dir
         log.info("Cleaning working directory...")
         command = "rm -rf data/creds"
-        #shell(command)
+        #shell(command) # TODO remove these for deploy
+
+        # extract config, creds, and state
         log.info("Extracting cloned state...")
         command = "cd data && tar xzf clone.tar.gz && cd .."
         #shell(command)
+        
         # load config
         log.info("Loading configuration...")
         self.cm = ConfigManager()
@@ -109,6 +104,79 @@ class Congregate:
         log.info("Loading state...")
         self.state = StateManager(self.conf)
         #self.state.load_state()
+
+
+    ### Request helpers ###
+    
+    def result_handler(self, future):
+        print(future.result())
+    
+    def local_request(self, msg):
+        f = asyncio.Future()
+        asyncio.ensure_future(self.c.bpcon_request(msg,f))
+        f.add_done_callback(self.result_handler)
+        self.loop.run_until_complete(f)
+    
+    def remote_request(self, optype, arg):
+        f = asyncio.Future()
+        asyncio.ensure_future(self.c.make_2pc_request(optype, arg, f))
+        f.add_done_callback(self.result_handler)
+        self.loop.run_until_complete(f)
+    
+
+    ### Database Requests ###
+
+    def get(self, key):
+        # TODO implement
+        pass
+
+    def put(self, key, value):
+        msg = "P,{},{}".format(key, value)
+        # do routing thing here
+        self.loop.run_until_complete(self.c.bpcon_request(msg))
+        #self.local_request(msg)
+
+    def delete(self, key):
+        msg = "D,{},".format(key)
+        # do routing thing here
+        self.local_request(msg)
+
+    ### Overlay Requests ###
+
+    def split(self):
+        log.info("initiating split request")
+        msg = "S,,"
+        self.local_request(msg)
+
+    def merge(self, targetGroup):
+        log.info("initiating merge request")
+        self.remote_request("M", targetGroup)
+        #self.loop.run_until_complete(self.c.make_2pc_request("M", targetGroup))
+
+    def congregate(self):
+        """ add self to local group (as specified in config) """
+        log.debug("attempting to congregate...")
+        try:
+            with open(self.conf['certfile'], 'r') as fh:
+                cert = fh.read()
+            with open(self.conf['keyfile'], 'r') as fh:
+                pubkey = fh.read()
+            wss = self.conf['p_wss']
+
+            msg = "A,{},{}<><><>{}".format(wss,pubkey,cert)
+            
+            self.local_request(msg)
+
+            #self.loop.run_until_complete(self.c.add_peer(wss,pubkey,cert,"G1"))
+
+        except Exception as e:
+            log.debug(e)
+
+    def remove_peer(self, wss):
+        #TODO implement
+        pass
+
+    ### Misc. Functions ###
 
     def clone(self):
         """
@@ -121,8 +189,8 @@ class Congregate:
             ownCert = "data/creds/local/server.crt"
             ownPubKey = "data/creds/local/server.pub"
 
-            ID = get_ID(self.conf['p_wss'])  
-            
+            ID = get_ID(self.conf['p_wss'])
+
             certCopy = "data/creds/peers/certs/{}.crt".format(ID)
             keyCopy = "data/creds/peers/keys/{}.pub".format(ID)
 
@@ -130,54 +198,18 @@ class Congregate:
             shell("cp {} {}".format(ownPubKey, keyCopy))
 
             # save groups and db to backup_dir
-            self.state.image_state() 
+            self.state.image_state()
             self.cm.save_config()
             backupdir = "backup/"
             cfile = "config.ini"
-            command = "cd data/ && tar czf clone.tar.gz {} {} creds/peers".format(cfile,backupdir)
+            command = "cd data/ && tar czf clone.tar.gz {} creds/peers".format(cfile)
             shell(command)
             log.info("clone of state successfully created")
-
+        
         except Exception as e:
             log.info("clone of state failed")
-
-    ### Requests ###
-
-    def local_request(self, msg):
-        log.info("replicating {}".format(msg))
-        self.loop.run_until_complete(self.c.bpcon_request(msg))
-
-    def group_request(self, req_type, target_group):
-        log.debug("group request initiated")
-        self.loop.run_until_complete(self.c.make_2pc_request(req_type, target_group))
-
-    def join_request(self):
-        """ Command Congregate instance to join its peers by supplying credentials """
-        log.debug("attempting to join")
-        try:
-            with open(self.conf['certfile'], 'r') as fh:
-                cert = fh.read()
-            with open(self.conf['keyfile'], 'r') as fh:
-                pubkey = fh.read()
-            wss = self.conf['p_wss']
-            self.loop.run_until_complete(self.c.handle_join(wss,pubkey,cert))
-        except Exception as e:
-            log.debug(e)
-
-    def handle_reconfig_request(self):
-        """ Create and return state clone """
-        self.clone()
-        with open('data/clone.tar.gz', 'r') as fh:
-            toreturn = fh.read()
-            log.debug("cloned state added successfully")
-            return toreturn    
-
-    def make_reconfig_request(self, wss):
-        """ Request state clone """ 
-        # TODO send a request
-        pass
-
-
+    
+    
     def shutdown(self):
         print("\nShutdown initiated...")
         print("\nDatabase contents:\n{}".format(self.bpcon.state.db.kvstore)) # save state here
@@ -200,44 +232,26 @@ class Congregate:
             self.handle_external_request(msg[1:])    
         # Client Request Handling
 
+
     def handle_db_request(self, request):
-        # client request for data
-        # route if necessary (manage for client)
-        # verification of request and requestor permissions
-        # self.db.get(k)
-        pass
-
-
-    def handle_API_request(self, msg):
-        # client API requests
-        if len(msg) < 4:
-            log.info("bad external request: too short")
-        else:    
-            try:
-                a,b,c = msg.split('<>')
-            except Exception as e:
-                log.info("bad external request: malformed")
-
-            if a == '0': # GET
-                #first check cache
-                self.state.db.get(b)
-            elif a == '1': # PUT
-                self.local_request("P,{},{}".format(b,c))
-            elif a == '2': # DEL
-                self.local_request("D,{},{}".format(b,"null"))
-            else: # malformed
-                log.info("bad API request")
+        # 1. extract and check input (GET, PUT, DEL only)
         
+        # 2. route if necessary (look in gossiped routing table, attempt, fail if it doesn't work)
+        
+        # 3. return value or failure
+        pass
 
     @asyncio.coroutine
     def mainloop(self, websocket, path):
         try:
-            input_msg = yield from websocket.recv()
-            log.debug("< {}".format(input_msg))
+            yield from websocket.send("Hello from Congregate!")
+            print("client connected")
+            #input_msg = yield from websocket.recv()
+            log.info("< {}".format(input_msg))
             if self.conf['use_single_port']:
                 output_msg = self.direct_msg(input_msg)
             else:   #using this port for external requests only
-                output_msg = yield from self.handle_external_request(input_msg)
+                output_msg = yield from self.handle_db_request(input_msg)
                 
             if output_msg:
                 yield from websocket.send(output_msg)
@@ -247,10 +261,6 @@ class Congregate:
                 yield from websocket.send("Hello from Congregate!")
                 log.error("got bad input from peer")
 
-            # adapt here
-                # reconfig requests
-                
-
         except Exception as e:
             log.debug(input_msg)
             log.error("mainloop exception: {}".format(e))
@@ -259,6 +269,8 @@ class Congregate:
 def start():
     if len(sys.argv) > 2:
         print("Usage: python congregate.py <configfile>")
+    if len(sys.argv) == 2:
+        configFile = sys.argv[1]
     else:    
         try:
             c = Congregate()
@@ -275,5 +287,7 @@ def start():
                 print('\nShutdown complete')
         except Exception as e:
             log.info("System failure: {}".format(e))
-start()
 
+if __name__ == '__main__':
+    start()
+        

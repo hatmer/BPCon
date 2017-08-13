@@ -45,7 +45,7 @@ class CongregateProtocol:
 
 
     @asyncio.coroutine
-    def bpcon_request(self, msg):
+    def bpcon_request(self, msg, future=None):
         """ Commit update to BPCon in-memory database """
         self.log.debug("making request: {}".format(msg)) 
         bpcon_task = asyncio.Future()
@@ -58,8 +58,17 @@ class CongregateProtocol:
             # repeatedly attempt to commit while failure was due to resync
             if commit_result['code'] == 2:
                 commit_result = yield from self.bpcon_request(msg)
-
-            return commit_result  # always returns code = 0 or code = 1
+            
+            if commit_result['code'] == 0:
+                if future: # processing a request for client
+                    future.set_result('OK')
+                print("check OK")
+                return True
+            #else:
+            #    if future:
+            #        future.set_result('NO')
+            #    return False
+            #return commit_result  # always returns code = 0 or code = 1
 
         except asyncio.TimeoutError:
             self.log.info("bpcon commit timed out")
@@ -67,6 +76,10 @@ class CongregateProtocol:
             self.log.info("bpcon commit future cancelled")
         except Exception as e:
             self.log.debug("bpcon commit misc. error: {}".format(e))
+        
+        if future:
+            future.set_result('NO')
+        return False
 
 
     ### Interface with other groups ###
@@ -86,7 +99,7 @@ class CongregateProtocol:
                 if (size_of_other_group + size_of_my_group) <= self.conf['MAX_GROUP_SIZE']:
                     return True
 
-            return False
+        return False
 
         # sanity check other types of group ops here
 
@@ -95,9 +108,6 @@ class CongregateProtocol:
         """
         Process 2pc request initiated by another group
         """
-        #if len(request) != 7:
-            #self.log.critical("refusing 2pc request. Invalid length of request: {} -> {}".format(request, len(request)))
-            #return
         self.log.info("handling 2pc request: {}".format(request))    
         phase, op = request.split(",", 1)
 
@@ -114,7 +124,7 @@ class CongregateProtocol:
             newgroup = "G2" if (group == 'G0') else "G0"
 
             if not self.sanity_check(action, newgroup):
-                self.log.critical("refusing 2pc request: sanity check on input fails")
+                self.log.critical("refusing 2pc request: sanity check fails on input: {}".format(request))
                 return
 
             self.log.info("remote P1 requested op is {}".format(action))
@@ -141,37 +151,32 @@ class CongregateProtocol:
                 return
 
             local_p2_msg = "G,commit,{}".format(newop)
-
             p2_success = yield from self.bpcon_request(local_p2_msg)
             response = "P2ACK"
+
         else:
             self.log.error("peer sent bad 2pc request")
 
         if lock_acquired:                
             self.log.debug("returning {}".format(response))
             return response      
-<<<<<<< HEAD
-        else:
-            # other 2pc request currently being processed
-            self.log.debug("failed to acquire lock in 2pc phase 1")
-=======
-      
->>>>>>> 7343333c34a680f9f4ae48a20d0946bf5866a996
         
 
     @asyncio.coroutine
-    def make_2pc_request(self, request_type, target_group):
+    def make_2pc_request(self, request_type, target_group, future):
         """
         Initiate multigroup update/request and notify neighbors of update
         """ 
         if self.bpcon.state.lock == "locked":
             self.log.debug("2pc failure: another group operation in progress")
+            future.set_result("NO")
             return
 
         # get members of target group
         group_members = self.bpcon.state.groups[target_group].get_peers()
         if len(group_members) == 0:
             self.log.error("initiated 2pc request with empty group {}".format(target_group))
+            future.set_result("NO")
             return
 
         # acquire lock internal consensus
@@ -196,6 +201,7 @@ class CongregateProtocol:
                 # quit because other group did not respond
                 # TODO will it return None if the other group says no? other cases?
                 self.log.debug("2pc failure because other group response is None")
+                future.set_result("NO")
                 return
 
             self.log.debug("P1 response is: {}".format(p1_response))
@@ -228,6 +234,8 @@ class CongregateProtocol:
                         
                         if p2_response == "P2ACK":
                             self.log.info("Congregate 2PC request completed successfully")
+                            future.set_result('OK')
+                            return True # 2pc succeeded
                         else:
                             self.bpcon.state = stateCopy
                             self.log.info("2PC request failed. p2 response not received. Local state not changed")
@@ -239,16 +247,16 @@ class CongregateProtocol:
                 self.log.info("non P1 response recieved: {}".format(p1_response))
         else:
             self.log.info("could not acquire lock")
+        
+        future.set_result('NO')
+        return False # 2pc failed
             
     def copy_state(self):
         self.stateCopy = self.bpcon.state.image_state()
 
-    ### Internal regulatory functions ###
-<<<<<<< HEAD
 
-=======
-        
->>>>>>> 7343333c34a680f9f4ae48a20d0946bf5866a996
+    ### Internal regulatory functions ###
+    
     @asyncio.coroutine
     def main_loop(self, websocket, path):
         try:
@@ -268,82 +276,27 @@ class CongregateProtocol:
         except Exception as e:
             self.log.error("mainloop exception: {}".format(e))
 
+
     @asyncio.coroutine
-    def handle_join(self, wss, pubkey, cert):
+    def add_peer(self, wss, pubkey, cert, group):
         """ perform join request for ungrouped peer """
         # TODO test peer creds
-        self.log.info("peer group is: {}".format(self.bpcon.state.groups['G1'].peers))
-        self.log.info("adding peer...") # TODO write to file for autobot
-        # add to local-group routing table
-        if "<><><>" in pubkey:
-            self.log.critical("intrusion attempt, bad pubkey input!!! Aborting...")
-            return
+        self.log.debug("peer group is: {}".format(self.bpcon.state.groups['G1'].peers))
+        self.log.info("adding peer {} to group {}".format(wss, group)) # TODO write to file for autobot
+        
         request = "A,{},{}<><><>{}".format(wss,pubkey,cert)
         res = yield from self.bpcon_request(request)
-        self.log.info("join request result: {}".format(res))
+        self.log.info("join request result: {}".format(res)) 
+        return res # True or False for bpcon commit success
         
         # TODO notify neighbor groups of membership change
-        
+
+    @asyncio.coroutine
+    def remove_peer(self, wss, group):
+        # TODO implement protocol
+        pass
 
     def keyspace_update(self, update):
+        #TODO implement gossip protocol
         pass
 
-    def groupmem_update(self, update):
-        pass
-
-    @asyncio.coroutine
-    def request_split(self):
-        self.log.info("initiating split request")
-        yield from self.bpcon_request("S,,")
-
-    @asyncio.coroutine
-    def request_merge(self, targetGroup):
-        self.log.info("initiating merge request")
-        yield from self.make_2pc_request("M", targetGroup)
-
-
-    def create_request(self, request_type, args=None):
-        """
-        Formats internal group consensus messages for:
-            - split
-            - merge
-            - migrate & add/remove peer
-            - keyspace change
-            - modify peer group membership
-
-        Message format:  local/other, change type, data
-ss
-        0: paxos operation
-        1: routing
-        2: congregate operation
-
-        1: keyspace
-        2: group membership
-        3: both
-
-        data: keyspace, groupmember sockets with corresponding keys
-
-        """
-        opList = []
-        #msg = "0&" # prepend if conf['use_single_port'] = 1
-        if request_type == "split":
-            self.log.debug("constructing split request")
-            opList.append("S,,")
-
-        elif request_type == "remove":
-            op = "R;G1;{};".format(wss,None)
-            print(op)
-        elif request_type == "add":
-            op = "A;G1;{};{}".format(wss,key)
-            print(op)
-        else: # multigroup operations 
-            #msg = "2&"
-            if request_type == "merge":
-                pass
-                #opList.append("M,
-            elif request_type == "keyspace":
-                # ks
-                pass
-        
-        return "<>".join(opList)
-        #return "G,commit,{}".format("<>".join(opList))
