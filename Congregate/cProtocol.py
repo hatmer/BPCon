@@ -62,13 +62,7 @@ class CongregateProtocol:
             if commit_result['code'] == 0:
                 if future: # processing a request for client
                     future.set_result('OK')
-                print("check OK")
                 return True
-            #else:
-            #    if future:
-            #        future.set_result('NO')
-            #    return False
-            #return commit_result  # always returns code = 0 or code = 1
 
         except asyncio.TimeoutError:
             self.log.info("bpcon commit timed out")
@@ -277,26 +271,27 @@ class CongregateProtocol:
             self.log.error("mainloop exception: {}".format(e))
 
 
-    @asyncio.coroutine
-    def add_peer(self, wss, pubkey, cert, group):
-        """ perform join request for ungrouped peer """
-        # TODO test peer creds
-        self.log.debug("peer group is: {}".format(self.bpcon.state.groups['G1'].peers))
-        self.log.info("adding peer {} to group {}".format(wss, group)) # TODO write to file for autobot
-        
-        request = "A,{},{}<><><>{}".format(wss,pubkey,cert)
-        res = yield from self.bpcon_request(request)
-        self.log.info("join request result: {}".format(res)) 
-        return res # True or False for bpcon commit success
-        
-        # TODO notify neighbor groups of membership change
+
+#    @asyncio.coroutine
+#    def add_peer(self, wss, pubkey, cert, group):
+#        """ perform join request for ungrouped peer """
+#        # TODO test peer creds
+#        self.log.debug("peer group is: {}".format(self.bpcon.state.groups['G1'].peers))
+#        self.log.info("adding peer {} to group {}".format(wss, group)) # TODO write to file for autobot
+#        
+#        request = "A,{},{}<><><>{}".format(wss,pubkey,cert)
+#        res = yield from self.bpcon_request(request)
+#        self.log.info("join request result: {}".format(res)) 
+#        return res # True or False for bpcon commit success
+#        
+#        # TODO notify neighbor groups of membership change
 
     @asyncio.coroutine
     def remove_peer(self, wss, group):
         # TODO implement protocol
         pass
 
-    def keyspace_update(self, update):
-        #TODO implement gossip protocol
-        pass
+#    def keyspace_update(self, update):
+#        #TODO implement gossip protocol
+#        pass
 

@@ -7,8 +7,11 @@
         <script>
             var ws = new WebSocket("ws://127.0.0.1:8002/"),
                 messages = document.createElement('ul');
-            //ws.send("hello\r\n");
-            ws.onmessage = function (event) {
+                ws.addEventListener('open', function (event) {
+                        ws.send('PUT 3 333');
+                });
+
+                ws.onmessage = function (event) {
                 var messages = document.getElementsByTagName('ul')[0],
                     message = document.createElement('li'),
                     content = document.createTextNode(event.data);

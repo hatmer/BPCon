@@ -12,12 +12,12 @@ import websockets
 import sys
 import time
 import hashlib
-
+import os.path
 from BPCon.protocol import BPConProtocol
 from Congregate.cProtocol import CongregateProtocol
 from Congregate.state import StateManager
 from Congregate.configManager import ConfigManager, log
-from BPCon.utils import shell, get_ID
+from BPCon.utils import shell, get_ID, get_hash_index
 from time import sleep
 
 configFile = "data/config.ini"
@@ -26,13 +26,15 @@ class Congregate:
     def __init__(self):
         """ Initialize system state and components """
         try:
-            # Load state
-            self.startup() # TODO make an init without cloned state an option
+            # Init, check for existing state
+            self.init_state() 
+
             # Create main event loop
             self.loop = asyncio.get_event_loop()
+
             # Create BPCon instance
-            self.bpcon = BPConProtocol(self.conf, self.state)
-            self.state.groups['G1'] = self.bpcon.peers # connect BPCon to Congregate instance
+            #self.bpcon = BPConProtocol(self.conf, self.state)
+            #self.state.groups['G1'] = self.bpcon.peers
             self.paxos_server = websockets.serve(self.bpcon.main_loop, self.conf['ip_addr'], self.conf['port'], ssl=self.conf['ssl'])
             self.loop.run_until_complete(self.paxos_server)
             log.info("Started BPCon on port {}".format(self.conf['port']))
@@ -51,7 +53,7 @@ class Congregate:
             # Add self to local group
             log.debug("adding self to local group")
             self.last_config_version = 0
-            self.congregate()
+            self.join_my_group()
             
 
             # Testing 
@@ -80,20 +82,21 @@ class Congregate:
         except Exception as e:
             log.info(e)
 
-    def startup(self):
+    def init_state(self):
         """
         startup routine
-        requests and loads from cloned state
+        loads from cloned state if present
         """
-        # clean working dir
-        log.info("Cleaning working directory...")
-        command = "rm -rf data/creds"
-        #shell(command) # TODO remove these for deploy
+        if os.path.isfile("data/clone.tar.gz"):
+            # clean working dir
+            log.info("Cleaning working directory...")
+            command = "rm -rf data/creds"
+            #shell(command) # TODO reenable these for deploy
 
-        # extract config, creds, and state
-        log.info("Extracting cloned state...")
-        command = "cd data && tar xzf clone.tar.gz && cd .."
-        #shell(command)
+            # extract config, creds, and state
+            log.info("Extracting cloned state...")
+            command = "cd data && tar xzf clone.tar.gz && cd .."
+            #shell(command)
         
         # load config
         log.info("Loading configuration...")
@@ -102,9 +105,13 @@ class Congregate:
 
         # load state
         log.info("Loading state...")
-        self.state = StateManager(self.conf)
-        #self.state.load_state()
+        s = StateManager(self.conf)
+        s.load_state()
 
+        # Create BPCon instance and assign state object
+        self.bpcon = BPConProtocol(self.conf, s)
+        self.bpcon.state = s
+        
 
     ### Request helpers ###
     
@@ -126,17 +133,15 @@ class Congregate:
 
     ### Database Requests ###
 
-    def get(self, key):
-        # TODO implement
-        pass
-
     def put(self, key, value):
+        """ Put a key value pair into replicated db """
         msg = "P,{},{}".format(key, value)
         # do routing thing here
         self.loop.run_until_complete(self.c.bpcon_request(msg))
         #self.local_request(msg)
 
     def delete(self, key):
+        """ Delete key value pair from replicated db"""
         msg = "D,{},".format(key)
         # do routing thing here
         self.local_request(msg)
@@ -144,18 +149,26 @@ class Congregate:
     ### Overlay Requests ###
 
     def split(self):
+        """ Split local group in half """
         log.info("initiating split request")
         msg = "S,,"
         self.local_request(msg)
 
     def merge(self, targetGroup):
+        """ Merge with another group """
         log.info("initiating merge request")
+        new_groupmembers = self.c.bpcon.state.groups[targetGroup].get_peers()
         self.remote_request("M", targetGroup)
+        newgroup = "G2" if (group == 'G0') else "G0"
+        
+        self.c.remote_request("G", val)
         #self.loop.run_until_complete(self.c.make_2pc_request("M", targetGroup))
 
-    def congregate(self):
+    
+
+    def join_my_group(self):
         """ add self to local group (as specified in config) """
-        log.debug("attempting to congregate...")
+        log.debug("attempting to join group specified in config...")
         try:
             with open(self.conf['certfile'], 'r') as fh:
                 cert = fh.read()
@@ -173,8 +186,10 @@ class Congregate:
             log.debug(e)
 
     def remove_peer(self, wss):
-        #TODO implement
-        pass
+        """ Remove a peer from group """
+        #log.debug("removing peer: {}
+
+        
 
     ### Misc. Functions ###
 
@@ -198,11 +213,10 @@ class Congregate:
             shell("cp {} {}".format(ownPubKey, keyCopy))
 
             # save groups and db to backup_dir
-            self.state.image_state()
+            self.c.bpcon.state.image_state()
             self.cm.save_config()
-            backupdir = "backup/"
-            cfile = "config.ini"
-            command = "cd data/ && tar czf clone.tar.gz {} creds/peers".format(cfile)
+            
+            command = "cd data/ && tar czf clone.tar.gz {} {} creds/peers".format(configFile, self.conf['backupdir'])
             shell(command)
             log.info("clone of state successfully created")
         
@@ -212,7 +226,7 @@ class Congregate:
     
     def shutdown(self):
         print("\nShutdown initiated...")
-        print("\nDatabase contents:\n{}".format(self.bpcon.state.db.kvstore)) # save state here
+        print("\nDatabase contents:\n{}".format(self.c.bpcon.state.db.kvstore)) # save state here
         self.paxos_server.close()
         self.congregate_server.close()
         print("\nPeer Groups:")
@@ -232,22 +246,44 @@ class Congregate:
             self.handle_external_request(msg[1:])    
         # Client Request Handling
 
-
     def handle_db_request(self, request):
-        # 1. extract and check input (GET, PUT, DEL only)
+        # 1. extract and check input
+        print("A")
+        op, k, v = request.split(" ", 2) # I expect key to have no spaces, should hash on frontend? or use magic number
+
+        if op not in ["GET", "PUT", "DEL"]:
+            return "Invalid request"
+
+        # if len(value) > xxx  # optional: cap maximum value size
+
+        keyhash = get_hash_index(k)
+
+
+        # check if in local keyspace
+        local_keyspace = self.c.bpcon.groups['G1'].keyspace
+        if keyhash >= local_keyspace[0] and keyhash < local_keyspace[1]:
+            # is local
+            if op == "GET":
+                ret = self.c.bpcon.state.db.get(keyhash)
+            elif op == "PUT":
+                ret = self.put(keyhash, value)
+            elif op == "DEL":
+                ret = self.delete(keyhash)
+
+        else:
+            # route request (look in gossiped routing table, attempt, fail if it doesn't work)
+            pass
+        print("YAY!")
+        return ret
         
-        # 2. route if necessary (look in gossiped routing table, attempt, fail if it doesn't work)
-        
-        # 3. return value or failure
-        pass
 
     @asyncio.coroutine
     def mainloop(self, websocket, path):
         try:
-            yield from websocket.send("Hello from Congregate!")
-            print("client connected")
-            #input_msg = yield from websocket.recv()
+            log.info("client connected") #TODO get info
+            input_msg = yield from websocket.recv()
             log.info("< {}".format(input_msg))
+
             if self.conf['use_single_port']:
                 output_msg = self.direct_msg(input_msg)
             else:   #using this port for external requests only
@@ -256,11 +292,10 @@ class Congregate:
             if output_msg:
                 yield from websocket.send(output_msg)
                 #self.bmsgs.append(output_msg)
-                
             else:
-                yield from websocket.send("Hello from Congregate!")
-                log.error("got bad input from peer")
-
+                log.error("something went wrong while processing request")
+            
+                
         except Exception as e:
             log.debug(input_msg)
             log.error("mainloop exception: {}".format(e))
