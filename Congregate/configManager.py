@@ -11,16 +11,21 @@ import os.path
 from Crypto.PublicKey import RSA
 from BPCon.utils import shell
 
+
 ### Logging Configuration ###
 
 fileConfig('data/logging_config.ini')
 log = logging.getLogger()
 
-#############################
+
+### System Configuration ###
 
 class ConfigManager:
 
     def load_config(self, configFile):
+
+        configFile = "data/"+configFile # all config files are in the data directory
+
         log = logging.getLogger() 
         self.config = configparser.ConfigParser()
         self.config.read(configFile)
@@ -34,7 +39,6 @@ class ConfigManager:
         
         log.info("adding peers from config")
         conf['peerlist'] = []
-        print(self.config.items('peers'))
         for key,val in self.config.items('peers'):
             wss = "wss://"+key+":"+val
             conf['peerlist'].append(wss) 
@@ -68,10 +72,10 @@ class ConfigManager:
         log.info("credentials okay")
 
         conf['use_single_port'] = bool(self.config['system']['use_single_port'])
-        conf['config_file'] = self.config['state']['config_file']
-        conf['backup_dir'] = self.config['state']['backup_dir']
+        #conf['config_file'] = self.config['state']['config_file']
+        #conf['backup_dir'] = self.config['state']['backup_dir']
         conf['MAX_GROUP_SIZE'] = int(self.config['vars']['MAX_GROUP_SIZE'])
-
+        #conf['clone_file'] = self.config['state']['config_file']
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
         ctx.load_cert_chain(certfile=conf['certfile'], keyfile=conf['keyfile'])
@@ -79,8 +83,30 @@ class ConfigManager:
         conf['is_client'] = int(self.config['testing']['is_client'])
         return conf
     
-    def save_config(self):
-        with open(self.config['state']['config_file'], 'w') as configfile:
-            self.config.write(configfile)
+    def save_config_for_clone(self, clone_ip, clone_port, cloneConfigFile):
+        #with open(self.config['state']['config_file'], 'w') as configfile: # for saving to own config file
+        clone = self.config
+        orig_ip = self.config['network']['ip_addr']
+        orig_port = self.config['network']['port']
+
+        # 1. set local IP address to addr of clone, as seen from original
+        clone.set('network', "ip_addr", clone_ip)
+        clone.set('network', "port", clone_port)
+
+        # 2. put original's ip into peers section of clone's config
+        new_peer_list = dict(self.config.items('peers'))
+
+        new_peer_list[orig_ip] = orig_port
+        
+        for ip, port in new_peer_list.items():
+            clone.set('peers', ip, port)
+
+        clone.set('testing', "is_client", "0")
+
+        # 3. write to file
+        with open("data/{}".format(cloneConfigFile), 'w') as fh:
+            clone.write(fh)
+        
+        print("config for clone saved")
 
 

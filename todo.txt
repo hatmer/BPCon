@@ -23,3 +23,8 @@ fix orderedDict
 trim avs periodically in reconfig
 move avs into state object
 change peers data structure to dict?
+
+
+hash ip values before sorting for split
+refactor configManager functions: use proper return codes
+

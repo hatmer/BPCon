@@ -9,4 +9,4 @@ cd congregate
 xterm -fa 'Monospace' -fs 14 -hold -e 'python run.py' &
 sleep 1
 cd ../demoCopy
-xterm -fa 'Monospace' -fs 14 -hold -e 'python run.py demo_config.ini' &
+xterm -fa 'Monospace' -fs 14 -hold -e 'python run.py config.ini-startup' &

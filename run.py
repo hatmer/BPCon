@@ -20,14 +20,14 @@ from Congregate.configManager import ConfigManager, log
 from BPCon.utils import shell, get_ID, get_hash_index
 from time import sleep
 
-configFile = "data/config.ini"
+#configFile = "config.ini"
 
 class Congregate:
-    def __init__(self):
+    def __init__(self, configFile):
         """ Initialize system state and components """
         try:
             # Init, check for existing state
-            self.init_state() 
+            self.init_state(configFile) 
 
             # Create main event loop
             self.loop = asyncio.get_event_loop()
@@ -52,10 +52,9 @@ class Congregate:
 
             # Add self to local group
             log.debug("adding self to local group")
-            self.last_config_version = 0
+            #self.last_config_version = 0
             self.join_my_group()
             
-
             # Testing 
             if self.conf['is_client']:
                 #self.c.reconfig()
@@ -82,11 +81,13 @@ class Congregate:
         except Exception as e:
             log.info(e)
 
-    def init_state(self):
+    def init_state(self, configFile):
         """
         startup routine
         loads from cloned state if present
         """
+
+        #if os.path.isfile("data/clone.tar.gz"):
         if os.path.isfile("data/clone.tar.gz"):
             # clean working dir
             log.info("Cleaning working directory...")
@@ -101,6 +102,7 @@ class Congregate:
         # load config
         log.info("Loading configuration...")
         self.cm = ConfigManager()
+        print("config file is: ", configFile)
         self.conf = self.cm.load_config(configFile)
 
         # load state
@@ -187,6 +189,7 @@ class Congregate:
 
     def remove_peer(self, wss):
         """ Remove a peer from group """
+        pass
         #log.debug("removing peer: {}
 
         
@@ -208,15 +211,19 @@ class Congregate:
 
             certCopy = "data/creds/peers/certs/{}.crt".format(ID)
             keyCopy = "data/creds/peers/keys/{}.pub".format(ID)
-
             shell("cp {} {}".format(ownCert, certCopy))
             shell("cp {} {}".format(ownPubKey, keyCopy))
-
             # save groups and db to backup_dir
             self.c.bpcon.state.image_state()
-            self.cm.save_config()
-            
-            command = "cd data/ && tar czf clone.tar.gz {} {} creds/peers".format(configFile, self.conf['backupdir'])
+            cloneConfigFile = configFile + "-startup"
+
+            # TODO get these from interaction with clone
+            clone_ip = "localhost"
+            clone_port = "9000"
+            self.cm.save_config_for_clone(clone_ip, clone_port, cloneConfigFile)
+            log.debug("config saved")
+
+            command = "cd data && tar czf clone.tar.gz {} backup creds/peers logging_config.ini".format(cloneConfigFile)
             shell(command)
             log.info("clone of state successfully created")
         
@@ -305,23 +312,27 @@ def start():
     if len(sys.argv) > 2:
         print("Usage: python congregate.py <configfile>")
     if len(sys.argv) == 2:
+        print("using custom config file")
         configFile = sys.argv[1]
-    else:    
+        print("configFile is now: ", configFile)
+    else:
+        configFile = "config.ini"
+
+    try:
+        c = Congregate(configFile)
         try:
-            c = Congregate()
             try:
-                try:
-                    asyncio.get_event_loop().run_forever()
-                except Exception as e:
-                    log.info("mainloop exception")
-                    log.error(e)
-            except KeyboardInterrupt:
-                c.shutdown()
-            finally:
-                asyncio.get_event_loop().close()
-                print('\nShutdown complete')
-        except Exception as e:
-            log.info("System failure: {}".format(e))
+                asyncio.get_event_loop().run_forever()
+            except Exception as e:
+                log.info("mainloop exception")
+                log.error(e)
+        except KeyboardInterrupt:
+            c.shutdown()
+        finally:
+            asyncio.get_event_loop().close()
+            print('\nShutdown complete')
+    except Exception as e:
+        log.info("System failure: {}".format(e))
 
 if __name__ == '__main__':
     start()
